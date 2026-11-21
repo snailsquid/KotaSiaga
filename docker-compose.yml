@@ -2,6 +2,12 @@
 # Used as-is by Coolify on volta and by `docker compose` on an STB. Images are built by CI
 # and pulled here; there are no `build:` keys so the deploy host never compiles Rust.
 # Local build: docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+#
+# Images are linux/amd64 only for now (CI runs on Gitea on volta, no arm runner). An ARM host
+# (ARM STB) cannot run this stack until the arm64 leg returns with GitHub Actions.
+# `pull_policy: always` on the two services is what makes Coolify pick up a new `:latest`, but
+# it also makes `docker compose up` fail whenever GHCR is unreachable, even if the images are
+# already cached locally. On an offline host use `docker compose up --pull never`.
 name: kotasiaga
 
 services:

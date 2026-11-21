@@ -1,11 +1,20 @@
 name: ci
 
 # Runs on Gitea Actions on volta (Gitea pull-mirrors this repo and reads .github/workflows).
-# Kept compatible with GitHub Actions. The Gitea mirror has no pull requests, so `test` runs on
-# every pushed branch; images and deploy run only on master.
+# Kept compatible with GitHub Actions. The Gitea mirror has no pull requests, so `test` and
+# `image` run on every pushed branch. Only master pushes images and deploys.
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+# One group per ref. On master, runs queue in trigger order and are never cancelled, so an
+# older run cannot push `:latest` after a newer one (only the newest pending run is kept,
+# which is the one we want deployed). On other refs a new push cancels the older run of the
+# same ref. Different branches use different groups, so they never block each other.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 env:
   # Images live in GHCR under the GitHub owner, whichever CI pushes them.
@@ -24,13 +33,17 @@ jobs:
       - run: cargo test --locked
       - run: npx -y @redocly/cli@1.34.5 lint openapi.yaml
 
+  # Builds on every push so buildx, the registry cache and the runner are exercised before
+  # merge. Only master logs in to GHCR, pushes and writes the cache; other refs build only.
   # linux/amd64 only: volta is x86 and there is no arm runner on Gitea.
   # arm64 (for an ARM STB) comes back with GitHub Actions: add a linux/arm64 leg on
   # ubuntu-24.04-arm and merge both digests under one tag with `docker buildx imagetools create`.
   image:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name != 'pull_request'
     needs: test
     runs-on: ubuntu-latest
+    env:
+      PUBLISH: ${{ github.ref == 'refs/heads/master' }}
     strategy:
       matrix:
         service: [core-service, identity-service]
@@ -38,7 +51,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       # Gitea's built-in token cannot push to GHCR: GHCR_TOKEN is a classic PAT with write:packages.
-      - uses: docker/login-action@v3
+      - if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: snailsquid
@@ -47,36 +61,113 @@ jobs:
         run: |
           short="${{ matrix.service }}"; short="${short%-service}"
           echo "image=${IMAGE_REGISTRY}/kotasiaga-${short}" >> "$GITHUB_OUTPUT"
+      # cache-from needs no login while the GHCR package is public; if it cannot be read,
+      # buildx logs a warning and builds without the cache.
       - uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           build-args: SERVICE=${{ matrix.service }}
-          push: true
+          push: ${{ env.PUBLISH == 'true' }}
           tags: |
             ${{ steps.name.outputs.image }}:latest
             ${{ steps.name.outputs.image }}:${{ github.sha }}
           cache-from: type=registry,ref=${{ steps.name.outputs.image }}:buildcache
-          cache-to: type=registry,ref=${{ steps.name.outputs.image }}:buildcache,mode=max
+          cache-to: ${{ env.PUBLISH == 'true' && format('type=registry,ref={0}:buildcache,mode=max', steps.name.outputs.image) || '' }}
 
-  # CD: ask Coolify on volta to redeploy the compose stack, which pulls the images pushed above.
-  # Runs on the runner on volta (label `volta`), since Coolify is private there. Reads repo secrets
-  # COOLIFY_URL, COOLIFY_RESOURCE_UUID and COOLIFY_TOKEN; skips with a warning while any is unset.
+  # CD: ask Coolify on volta to redeploy the compose stack, which pulls the images pushed above,
+  # then wait for the deployment and the public health check. Runs on the runner on volta
+  # (label `volta`), since Coolify is private there. Reads repo secrets COOLIFY_URL,
+  # COOLIFY_RESOURCE_UUID and COOLIFY_TOKEN; skips with a warning (also in the run summary)
+  # while any is unset. HEALTH_URL (repo variable or secret) overrides the health check URL.
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
     needs: image
     runs-on: volta
+    env:
+      COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+      COOLIFY_RESOURCE_UUID: ${{ secrets.COOLIFY_RESOURCE_UUID }}
     steps:
       - name: Trigger Coolify deploy
-        env:
-          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
-          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-          COOLIFY_RESOURCE_UUID: ${{ secrets.COOLIFY_RESOURCE_UUID }}
+        id: trigger
         run: |
           if [ -z "$COOLIFY_URL" ] || [ -z "$COOLIFY_TOKEN" ] || [ -z "$COOLIFY_RESOURCE_UUID" ]; then
-            echo "::warning::Coolify secrets not set; skipping deploy"
+            msg="Coolify secrets not set (COOLIFY_URL, COOLIFY_TOKEN, COOLIFY_RESOURCE_UUID); deploy SKIPPED, nothing was deployed"
+            echo "::warning::$msg"
+            echo "### :warning: $msg" >> "$GITHUB_STEP_SUMMARY"
+            echo "triggered=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          curl --fail-with-body -sS --max-time 30 --retry 2 --retry-all-errors \
-            -H "Authorization: Bearer $COOLIFY_TOKEN" \
-            "${COOLIFY_URL%/}/api/v1/deploy?uuid=${COOLIFY_RESOURCE_UUID}&force=false"
+          # Retry only when no connection was made (6 = DNS, 7 = connect refused). A timeout
+          # or HTTP error is not retried: the request may have reached Coolify, and a second
+          # GET could queue a second deploy.
+          for attempt in 1 2 3; do
+            rc=0
+            body=$(curl --fail-with-body -sS --connect-timeout 10 --max-time 30 \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" \
+              "${COOLIFY_URL%/}/api/v1/deploy?uuid=${COOLIFY_RESOURCE_UUID}&force=false") || rc=$?
+            if [ "$rc" -eq 6 ] || [ "$rc" -eq 7 ]; then
+              echo "No connection to Coolify (curl exit $rc), attempt $attempt of 3"
+              sleep $((attempt * 5))
+              continue
+            fi
+            break
+          done
+          echo "$body"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::Coolify deploy request failed (curl exit $rc)"
+            exit 1
+          fi
+          deployment=$(printf '%s' "$body" | grep -o '"deployment_uuid"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
+          echo "triggered=true" >> "$GITHUB_OUTPUT"
+          echo "deployment=$deployment" >> "$GITHUB_OUTPUT"
+          echo "Coolify deploy queued for ${GITHUB_SHA} (deployment ${deployment:-unknown})" >> "$GITHUB_STEP_SUMMARY"
+
+      # Waits for Coolify to finish pulling and restarting. Without this, the health check
+      # below could pass against the old containers.
+      - name: Wait for Coolify deployment
+        if: steps.trigger.outputs.triggered == 'true'
+        env:
+          DEPLOYMENT: ${{ steps.trigger.outputs.deployment }}
+        run: |
+          if [ -z "$DEPLOYMENT" ]; then
+            echo "::warning::Coolify returned no deployment_uuid; cannot wait for the deployment to finish"
+            exit 0
+          fi
+          deadline=$(( $(date +%s) + 300 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            body=$(curl -sS --connect-timeout 10 --max-time 15 \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" \
+              "${COOLIFY_URL%/}/api/v1/deployments/${DEPLOYMENT}" || true)
+            status=$(printf '%s' "$body" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
+            echo "deployment ${DEPLOYMENT}: ${status:-unknown}"
+            case "$status" in
+              finished) exit 0 ;;
+              failed|cancelled*) echo "::error::Coolify deployment ${DEPLOYMENT} ended as ${status}"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::Coolify deployment ${DEPLOYMENT} did not finish within 5 minutes"
+          exit 1
+
+      # The health endpoint only returns {"status":"ok"} (no version or sha), so this checks
+      # that the stack serves traffic after the deploy, not which image it runs.
+      - name: Health check
+        if: steps.trigger.outputs.triggered == 'true'
+        env:
+          HEALTH_URL: ${{ vars.HEALTH_URL || secrets.HEALTH_URL || 'https://kotasiaga.arkk.dev/api/health' }}
+        run: |
+          deadline=$(( $(date +%s) + 300 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            body=$(curl -sS --connect-timeout 10 --max-time 10 "$HEALTH_URL" || true)
+            if printf '%s' "$body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+              echo "Health check OK: $HEALTH_URL"
+              echo "Health check OK: $HEALTH_URL" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Not healthy yet: $(printf '%s' "${body:-no response}" | tr -s '[:space:]' ' ' | head -c 160)"
+            sleep 10
+          done
+          echo "::error::$HEALTH_URL did not return {\"status\":\"ok\"} within 5 minutes"
+          exit 1
