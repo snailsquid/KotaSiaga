@@ -8,12 +8,14 @@
 mod adapters;
 mod config;
 mod db;
+mod engine;
 mod feed;
 mod http;
 mod mock;
 mod reports;
 mod risk;
 mod routing;
+mod rules;
 mod verification;
 
 use std::net::SocketAddr;
@@ -23,7 +25,9 @@ use tracing_subscriber::EnvFilter;
 #[derive(Clone)]
 pub struct AppState {
     pub config: std::sync::Arc<config::Config>,
+    #[allow(dead_code)] // used by the write endpoints (reports, votes, subscriptions)
     pub db: sqlx::SqlitePool,
+    pub engine: std::sync::Arc<engine::Engine>,
 }
 
 #[tokio::main]
@@ -53,10 +57,22 @@ async fn main() {
         std::process::exit(1);
     });
 
+    if config.api_keys.is_empty() && config.admin_api_key.is_none() {
+        tracing::warn!("no API_KEYS or ADMIN_API_KEY set: every keyed endpoint will return 401");
+    }
+
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
+    let engine = std::sync::Arc::new(engine::Engine::new(&config, chrono::Utc::now()));
+    let tick = std::time::Duration::from_secs(if config.mock.enabled {
+        config.mock.tick_seconds
+    } else {
+        5
+    });
+    spawn_ticker(engine.clone(), tick);
     let state = AppState {
         config: std::sync::Arc::new(config),
         db,
+        engine,
     };
     let app = http::router(state);
 
@@ -66,6 +82,21 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("server");
+}
+
+/// Drives time-based rules (expiry, decay) and, in mock mode, the generator.
+fn spawn_ticker(engine: std::sync::Arc<engine::Engine>, every: std::time::Duration) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(every);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            let e = engine.clone();
+            // The tick is CPU work; keep it off the request-serving threads.
+            let _ = tokio::task::spawn_blocking(move || e.tick(chrono::Utc::now())).await;
+        }
+    });
 }
 
 async fn shutdown_signal() {

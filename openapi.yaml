@@ -1,13 +1,16 @@
 openapi: 3.0.3
 info:
   title: KotaSiaga Smart City API
-  version: 0.1.0
+  version: 0.1.1
   description: |
     Kondisi kota dan rute aman untuk Bandung. Contract is PROPOSED (AGENTS.md section 4):
     Tourism (JelajahLokal) and Health (DonorKita) must agree before the API Registry entry (2026-11-29).
 
     Conventions: JSON, snake_case keys, lowercase enum values, ISO 8601 UTC with `Z`,
     meters / seconds / °C, WGS84 `lat`/`lon`, `bbox` = `min_lon,min_lat,max_lon,max_lat`.
+
+    Service area: Bandung Raya (lat -7.10 to -6.75, lon 107.45 to 107.80), split into 500 m cells.
+    A `lat`/`lon` outside it returns `422 validation_error`; a `bbox` is clipped to it.
 servers:
   - url: https://{name}.stei.site/api
     variables:
@@ -79,7 +82,9 @@ paths:
     get:
       tags: [city]
       summary: Risk of one cell (lat+lon) or all cells in a bbox
-      description: Give either `lat`+`lon` (returns one cell) or `bbox` (returns a list), not both.
+      description: |
+        Give either `lat`+`lon` (returns one cell) or `bbox` (returns a list), not both.
+        A `bbox` may cover at most 2500 cells (about 25 x 25 km); larger boxes return 422.
       operationId: getRisk
       parameters:
         - $ref: '#/components/parameters/Lat'

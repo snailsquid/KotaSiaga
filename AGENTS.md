@@ -91,6 +91,8 @@ Auth column: `key` = `X-API-Key`, `jwt` = user token, `pub` = none.
 | `POST /reports/{id}/votes` | jwt | body `{"vote":"confirm"\|"dispute"}` |
 | `POST /subscriptions`, `GET /subscriptions`, `GET /alerts` | jwt | area subscriptions and alerts |
 
+Service area: Bandung Raya (lat -7.10 to -6.75, lon 107.45 to 107.80). Points outside return `422 validation_error`. A `/risk?bbox=` covers at most 2500 cells.
+
 Enums:
 
 - `category`: `flood`, `accident`, `road_damage`, `road_closure`, `event_crowd`.
