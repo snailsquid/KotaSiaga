@@ -34,13 +34,14 @@ services:
     restart: unless-stopped
     depends_on: [core-service, identity-service]
     volumes: ["./gateway/nginx.conf:/etc/nginx/nginx.conf:ro"]
-    # Loopback only. On volta a host-network cloudflared routes the hostname here (GATEWAY_PORT=18080,
-    # since 8080 is Traefik's). On an STB the `tunnel` service reaches the gateway over the compose network.
+    # Loopback only, for local checks (GATEWAY_PORT=18080 on volta, since 8080 is Traefik's).
+    # Public traffic: on volta, Coolify's Traefik (domain kotasiaga.arkk.dev); on an STB, the
+    # `tunnel` service. Both reach the gateway over the compose network.
     ports: ["127.0.0.1:${GATEWAY_PORT:-8080}:80"]
     mem_limit: 64m
     cpus: 0.25
 
-  # Only with COMPOSE_PROFILES=tunnel (STB). volta uses its existing host cloudflared instead.
+  # Only with COMPOSE_PROFILES=tunnel (STB). volta routes through its wildcard tunnel and Traefik.
   tunnel:
     image: cloudflare/cloudflared:latest
     profiles: [tunnel]

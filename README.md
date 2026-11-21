@@ -68,8 +68,10 @@ GitHub environment `volta` holds these secrets; the job skips with a warning whi
 
 Env vars are set in the Coolify app, which writes them to the `.env` the services read: `IMAGE_REGISTRY`, `IMAGE_TAG`, `RUST_LOG`,
 `MOCK_*` and `GATEWAY_PORT=18080` (8080 belongs to Traefik there). `COMPOSE_PROFILES` stays unset,
-so the `tunnel` container does not start; volta's existing host cloudflared routes the public
-hostname to `http://127.0.0.1:18080`.
+so the `tunnel` container does not start. Public traffic reaches the gateway through the Coolify
+domain `kotasiaga.arkk.dev`: volta's wildcard `*.arkk.dev` Cloudflare tunnel points at Coolify's
+Traefik, which reaches the gateway over the compose network. The loopback `GATEWAY_PORT` publish
+is only for local checks on the host.
 
 ### STB (manual)
 
