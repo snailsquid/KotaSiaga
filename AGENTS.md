@@ -2,7 +2,7 @@
 
 Read this whole file before you write or change code, an API contract, or a doc. Every agent in this cluster (Claude Code, Codex, Cursor, Copilot, Gemini CLI, others) follows this same file so the three services stay compatible. If your own idea conflicts with this file, this file wins. If this file is silent or unclear, stop and ask a human. Do not guess.
 
-- Last updated: 2026-11-20. Owner: Smart City group (KotaSiaga).
+- Last updated: 2026-11-21. Owner: Smart City group (KotaSiaga).
 - Status tags: **CONFIRMED** = stated in the Tugas Besar brief or in that group's submitted DDD paper. **PROPOSED** = drafted here, the other group must agree. **TBD** = unknown, ask.
 
 ## 0. Load this file in your agent
@@ -215,7 +215,10 @@ Domain event names stay as in the DDD paper (`LaporanTerverifikasi`, `LaporanKed
 
 ## 9. Stack and infra
 
-- Backend stack (Smart City): **TBD, ask a human. Do not choose one.** Once written here, do not switch.
+- Backend stack (Smart City): **Rust** (stable) with **Tokio** runtime and **Axum** HTTP. Chosen by a human on 2026-11-21 for speed under the STB limits. Do not switch.
+  - Database: **SQLite in WAL mode** (`PRAGMA journal_mode=WAL`), embedded, one file per container, on a Docker volume. Chosen by a human on 2026-11-21. Back up with SQLite's backup API or `VACUUM INTO`, never by copying only the `.db` file.
+  - Hot read data (risk grid, current weather, last 500 changes) stays in memory and is recomputed only on domain events. Reads never recompute risk.
+  - Images are multi-arch (`linux/amd64` + `linux/arm64` under one tag) so the same compose file runs on the Volta host (current deploy target) and on an ARM STB. Never compile Rust on the deploy host: GitHub Actions builds each arch natively and pushes to GHCR; the host only pulls.
 - Layout: five business contexts as modules in one `core-service` (own tables each), plus a separate Identity and Access container, an Nginx gateway and the Cloudflare tunnel.
 - Container limits: core `mem_limit: 256m`, `cpus: 0.5`; gateway `mem_limit: 64m`. Add `restart: unless-stopped`. Secrets in `.env` (git-ignored). Back up the database regularly.
 - Integration layer and the mobile app are deployed off the STB.
@@ -245,4 +248,3 @@ Domain event names stay as in the DDD paper (`LaporanTerverifikasi`, `LaporanKed
 - Health endpoint paths and fields; Tourism base URL.
 - Tourism ↔ Health arrows.
 - Section 4 and the enum values need a yes from Tourism and Health.
-- Backend stack for Smart City.

@@ -1,0 +1,1 @@
+//! Adaptor Data Eksternal (anti-corruption layer): the only place that calls Open-Meteo, PetaBencana, OSRM, Overpass, Tourism and Health. 5 s timeout, one retry with jitter, last-good cache, one log line per cross-group call.
