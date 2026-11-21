@@ -47,12 +47,45 @@ DATABASE_PATH=./core.db PORT=8080 cargo run -p core-service
 CI (`.github/workflows/ci.yml`) tests every push and, on `master`, builds multi-arch images
 (`linux/amd64` + `linux/arm64`, one tag) on native GitHub runners and pushes them to GHCR.
 Any host (x86 server or ARM STB) runs the same compose file and Docker pulls the matching arch.
-Never compile Rust on the deploy host.
+Never compile Rust on the deploy host: `docker-compose.yml` has no `build:` keys on purpose.
+
+### volta (Coolify)
+
+Coolify on volta runs this repo as a **git-based** Docker Compose app (`kotasiaga`, branch
+`master`, file `/docker-compose.yml`). It has to be git-based because the gateway bind-mounts
+`./gateway/nginx.conf` from the checkout. Coolify only sees compose changes once they are on `master`.
+
+After the images are pushed, the `deploy` job runs on the self-hosted runner on volta
+(labels `self-hosted, linux, x64, volta, kotasiaga`) and calls Coolify's deploy API.
+`core-service` and `identity-service` use `pull_policy: always`, so each deploy pulls `:latest`.
+GitHub environment `volta` holds these secrets; the job skips with a warning while any is unset:
+
+| Secret | Value |
+|---|---|
+| `COOLIFY_URL` | Coolify base URL as seen from the volta runner |
+| `COOLIFY_TOKEN` | Coolify API token with deploy permission |
+| `COOLIFY_RESOURCE_UUID` | UUID of the `kotasiaga` compose app |
+
+Env vars are set in the Coolify app, which writes them to the `.env` the services read: `IMAGE_REGISTRY`, `IMAGE_TAG`, `RUST_LOG`,
+`MOCK_*` and `GATEWAY_PORT=18080` (8080 belongs to Traefik there). `COMPOSE_PROFILES` stays unset,
+so the `tunnel` container does not start; volta's existing host cloudflared routes the public
+hostname to `http://127.0.0.1:18080`.
+
+### STB (manual)
 
 ```sh
-cp .env.example .env           # fill TUNNEL_TOKEN and IMAGE_REGISTRY; never commit .env
+cp .env.example .env           # fill TUNNEL_TOKEN; keep COMPOSE_PROFILES=tunnel; never commit .env
 docker compose pull && docker compose up -d
 curl http://127.0.0.1:8080/api/health
+```
+
+`COMPOSE_PROFILES=tunnel` starts the `cloudflared` container, which reaches the gateway over the
+compose network.
+
+### Local build (never on a deploy host)
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 ```
 
 Back up SQLite with `VACUUM INTO` or the backup API, not by copying only the `.db` file (WAL mode).

@@ -5,6 +5,11 @@ on:
     branches: [master]
   pull_request:
 
+# One deploy at a time on master; a newer push cancels an older run still building.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -89,3 +94,27 @@ jobs:
             -t "$image:latest" -t "$image:${GITHUB_SHA}" \
             $(for f in /tmp/digests/*; do echo "$image@$(cat "$f")"; done)
           docker buildx imagetools inspect "$image:latest"
+
+  # CD: ask Coolify on volta to redeploy the compose stack, which pulls the images pushed above.
+  # Runs on the self-hosted runner on volta (Coolify is private there). Environment `volta` holds
+  # COOLIFY_URL, COOLIFY_RESOURCE_UUID and COOLIFY_TOKEN (API token with deploy permission).
+  # Skips with a warning while any of them is unset.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: merge
+    runs-on: [self-hosted, linux, x64, volta, kotasiaga]
+    environment: volta
+    steps:
+      - name: Trigger Coolify deploy
+        env:
+          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_RESOURCE_UUID: ${{ secrets.COOLIFY_RESOURCE_UUID }}
+        run: |
+          if [ -z "$COOLIFY_URL" ] || [ -z "$COOLIFY_TOKEN" ] || [ -z "$COOLIFY_RESOURCE_UUID" ]; then
+            echo "::warning::Coolify secrets not set; skipping deploy"
+            exit 0
+          fi
+          curl --fail-with-body -sS --max-time 30 --retry 2 --retry-all-errors \
+            -H "Authorization: Bearer $COOLIFY_TOKEN" \
+            "${COOLIFY_URL%/}/api/v1/deploy?uuid=${COOLIFY_RESOURCE_UUID}&force=false"
