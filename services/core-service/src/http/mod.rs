@@ -25,7 +25,7 @@ pub fn router(state: AppState) -> Router {
         .route("/reports", get(city::reports))
         .route("/changes", get(city::changes));
 
-    let keyed = if state.engine.mock.is_some() {
+    let keyed = if state.engine.mock_enabled() {
         let admin = Router::new()
             .route("/_mock/state", get(mock::state))
             .route("/_mock/scenario", post(mock::scenario))
@@ -252,5 +252,150 @@ mod tests {
             StatusCode::NOT_FOUND,
             "mock routes do not exist outside mock mode"
         );
+    }
+
+    #[tokio::test]
+    async fn risk_bbox_is_clipped_to_the_service_area() {
+        let st = state(true).await;
+        // Sticks out north and west of Bandung Raya; same cells as the clipped box.
+        let (status, partly) = get(&st, "/api/risk?bbox=107.40,-6.80,107.47,-6.70").await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, clipped) = get(&st, "/api/risk?bbox=107.45,-6.80,107.47,-6.75").await;
+        let partly = partly["data"].as_array().unwrap();
+        assert!(!partly.is_empty());
+        assert_eq!(partly, clipped["data"].as_array().unwrap());
+
+        let (status, body) = get(&st, "/api/risk?bbox=106.7,-6.3,106.9,-6.1").await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "Jakarta box is outside, not an error"
+        );
+        assert_eq!(body["data"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn status_is_unavailable_without_a_source() {
+        // Documents current behaviour: no Open-Meteo adapter yet, so live mode has no weather.
+        let (status, body) = get(
+            &state(false).await,
+            "/api/status?lat=-6.9&lon=107.6&radius_m=2000",
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "upstream_unavailable");
+    }
+
+    async fn scenario(st: &AppState, name: &str) -> StatusCode {
+        let req = Request::post("/api/_mock/scenario")
+            .header("x-api-key", ADMIN)
+            .header("content-type", "application/json")
+            .body(Body::from(format!(r#"{{"name":"{name}"}}"#)))
+            .unwrap();
+        send(st, req).await.0
+    }
+
+    async fn stale(st: &AppState) -> Value {
+        get(st, "/api/risk?lat=-6.9&lon=107.6").await.1["meta"]["stale"].clone()
+    }
+
+    #[tokio::test]
+    async fn upstream_down_marks_stale_until_recover_or_reset() {
+        let st = state(true).await;
+        for clear in ["recover", "reset"] {
+            assert_eq!(scenario(&st, "upstream_down").await, StatusCode::ACCEPTED);
+            assert_eq!(stale(&st).await, true, "upstream_down must set meta.stale");
+            let (_, body) = get_with(&st, "/api/_mock/state", Some(ADMIN)).await;
+            assert_eq!(body["data"]["upstreams_down"], json!(["open_meteo"]));
+            assert_eq!(scenario(&st, clear).await, StatusCode::ACCEPTED);
+            assert_eq!(stale(&st).await, false, "{clear} must clear meta.stale");
+        }
+    }
+
+    #[tokio::test]
+    async fn mock_state_is_read_only() {
+        let st = state(true).await;
+        let t0 = Utc::now();
+        for i in 1..=5 {
+            st.engine.tick(t0 + Duration::seconds(5 * i));
+        }
+        let before = st.engine.snapshot();
+        for _ in 0..5 {
+            let (status, body) = get_with(&st, "/api/_mock/state", Some(ADMIN)).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(body["meta"]["seq"].as_u64(), Some(before.seq));
+            assert_eq!(body["data"]["tick"], 5);
+        }
+        assert!(
+            std::sync::Arc::ptr_eq(&before, &st.engine.snapshot()),
+            "GET /_mock/state must not publish a new snapshot"
+        );
+    }
+
+    /// Regression for the tick vs /_mock lock-order deadlock: ticks on one OS thread,
+    /// /_mock/state and /_mock/scenario from several tasks at the same time, for a fixed
+    /// wall time. Fails (does not hang) if they ever block each other.
+    #[test]
+    fn ticks_and_mock_calls_do_not_deadlock() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::time::{Duration as StdDuration, Instant};
+        const RUN_FOR: StdDuration = StdDuration::from_secs(2);
+        const CALLERS: usize = 4;
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(CALLERS)
+                .enable_all()
+                .build()
+                .unwrap();
+            let counts = rt.block_on(async {
+                let st = state(true).await;
+                let stop = Arc::new(AtomicBool::new(false));
+                let ticks = Arc::new(AtomicU64::new(0));
+                let ticker = {
+                    let (engine, stop, ticks) = (st.engine.clone(), stop.clone(), ticks.clone());
+                    std::thread::spawn(move || {
+                        let t0 = Utc::now();
+                        while !stop.load(Ordering::Relaxed) {
+                            let n = ticks.fetch_add(1, Ordering::Relaxed) as i64 + 1;
+                            engine.tick(t0 + Duration::seconds(5 * n));
+                            std::thread::yield_now();
+                        }
+                    })
+                };
+                let calls = Arc::new(AtomicU64::new(0));
+                let started = Instant::now();
+                let tasks: Vec<_> = (0..CALLERS)
+                    .map(|k| {
+                        let (st, calls) = (st.clone(), calls.clone());
+                        tokio::spawn(async move {
+                            let mut i = k;
+                            while started.elapsed() < RUN_FOR {
+                                let (status, _) =
+                                    get_with(&st, "/api/_mock/state", Some(ADMIN)).await;
+                                assert_eq!(status, StatusCode::OK);
+                                let name = crate::mock::SCENARIOS[i % crate::mock::SCENARIOS.len()];
+                                assert_eq!(scenario(&st, name).await, StatusCode::ACCEPTED);
+                                calls.fetch_add(2, Ordering::Relaxed);
+                                i += 1;
+                            }
+                        })
+                    })
+                    .collect();
+                for t in tasks {
+                    t.await.unwrap();
+                }
+                stop.store(true, Ordering::Relaxed);
+                ticker.join().unwrap();
+                (ticks.load(Ordering::Relaxed), calls.load(Ordering::Relaxed))
+            });
+            let _ = tx.send(counts);
+        });
+        let (ticks, calls) = rx
+            .recv_timeout(RUN_FOR + StdDuration::from_secs(30))
+            .expect("ticks and /_mock calls did not finish: deadlock between tick and /_mock?");
+        assert!(ticks > 0 && calls > 0, "ticks {ticks}, calls {calls}");
     }
 }

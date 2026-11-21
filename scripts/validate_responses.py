@@ -1,5 +1,5 @@
 """Validate live responses against openapi.yaml 200/201/202 schemas (OpenAPI 3.0 -> JSON Schema)."""
-import json, sys, urllib.request, yaml
+import json, sys, urllib.error, urllib.request, yaml
 from jsonschema import Draft202012Validator
 
 spec = yaml.safe_load(open(sys.argv[1]))
@@ -29,8 +29,15 @@ def schema_for(path, method, code):
 def call(method, url, body=None, k=key):
     req = urllib.request.Request(base + url, method=method.upper(), data=json.dumps(body).encode() if body else None,
                                  headers={"X-API-Key": k, "content-type": "application/json"})
-    with urllib.request.urlopen(req) as r:
-        return r.status, json.load(r)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:  # non-2xx: report it, do not crash the run
+        try:
+            doc = json.load(e)
+        except ValueError:
+            doc = {}
+        return e.code, doc
 
 cases = [
     ("/health", "get", "/health", None, key),
@@ -47,6 +54,11 @@ cases = [
 bad = 0
 for path, method, url, body, k in cases:
     status, doc = call(method, url, body, k)
+    if not 200 <= status < 300:
+        bad += 1
+        err = doc.get("error", {}) if isinstance(doc, dict) else {}
+        print(f"BAD {method.upper():4} {url} -> {status} {err.get('code', '')}: {err.get('message', '')}")
+        continue
     errs = list(Draft202012Validator(schema_for(path, method, str(status))).iter_errors(doc))
     n = len(doc["data"]) if isinstance(doc.get("data"), list) else 1
     print(f"{'OK ' if not errs else 'BAD'} {method.upper():4} {url} -> {status} ({n} item(s))")

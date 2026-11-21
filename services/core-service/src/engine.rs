@@ -9,7 +9,7 @@ use chrono::{DateTime, Duration, Utc};
 use crate::config::Config;
 use crate::feed::{Change, ChangeFeed, ChangeType};
 use crate::http::envelope::Source;
-use crate::mock::Generator;
+use crate::mock::{Generator, MockState};
 use crate::reports::{Category, NewReport, Report, ReportStatus};
 use crate::risk::RiskGrid;
 use crate::risk::grid::CellId;
@@ -210,7 +210,7 @@ impl World {
             .reports
             .iter()
             .position(|r| r.id == report_id)
-            .ok_or(VoteError::NotWaiting)?;
+            .ok_or(VoteError::NotFound)?;
         let outcome = self
             .verification
             .vote(&mut self.reports[i], user, vote, now)?;
@@ -386,6 +386,7 @@ impl World {
             reports,
             disasters,
             changes: self.feed.to_vec(),
+            mock: None,
         }
     }
 }
@@ -403,12 +404,21 @@ pub struct Snapshot {
     /// Active signals, then recently resolved ones.
     pub disasters: Vec<DisasterSignal>,
     pub changes: Vec<Change>,
+    /// Generator counters as of this snapshot (mock mode only). `/_mock/state` reads this.
+    pub mock: Option<MockState>,
+}
+
+/// The single writer state: the world plus, in mock mode, the generator that drives it.
+/// Both live behind one mutex so there is exactly one lock to take (no lock-order bugs).
+struct Inner {
+    world: World,
+    mock: Option<Generator>,
 }
 
 pub struct Engine {
-    world: Mutex<World>,
+    inner: Mutex<Inner>,
     snapshot: RwLock<Arc<Snapshot>>,
-    pub mock: Option<Mutex<Generator>>,
+    mock_enabled: bool,
 }
 
 impl Engine {
@@ -420,14 +430,19 @@ impl Engine {
             Source::Live
         };
         let mut world = World::new(source, mock_cfg.map(|m| m.time_scale), now);
-        let mock = mock_cfg.map(|m| Mutex::new(Generator::new(m, &mut world, now)));
+        let mock = mock_cfg.map(|m| Generator::new(m, &mut world, now));
         world.settle(now);
-        let snap = Arc::new(world.snapshot(now));
+        let inner = Inner { world, mock };
+        let snap = Arc::new(inner.snapshot(now));
         Self {
-            world: Mutex::new(world),
+            inner: Mutex::new(inner),
             snapshot: RwLock::new(snap),
-            mock,
+            mock_enabled: mock_cfg.is_some(),
         }
+    }
+
+    pub fn mock_enabled(&self) -> bool {
+        self.mock_enabled
     }
 
     pub fn snapshot(&self) -> Arc<Snapshot> {
@@ -437,24 +452,64 @@ impl Engine {
             .clone()
     }
 
-    /// Runs `f` as the single writer, settles time-driven rules and publishes a new snapshot.
-    pub fn update<R>(&self, now: DateTime<Utc>, f: impl FnOnce(&mut World) -> R) -> R {
-        let mut w = self.world.lock().unwrap_or_else(|e| e.into_inner());
-        let out = f(&mut w);
-        w.settle(now);
-        let snap = Arc::new(w.snapshot(now));
+    fn write<R>(&self, now: DateTime<Utc>, f: impl FnOnce(&mut Inner) -> R) -> R {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let out = f(&mut inner);
+        inner.world.settle(now);
+        let snap = Arc::new(inner.snapshot(now));
         *self.snapshot.write().unwrap_or_else(|e| e.into_inner()) = snap;
         out
     }
 
+    /// Runs `f` as the single writer, settles time-driven rules and publishes a new snapshot.
+    #[allow(dead_code)] // used by the write endpoints (reports, votes) once they land
+    pub fn update<R>(&self, now: DateTime<Utc>, f: impl FnOnce(&mut World) -> R) -> R {
+        self.write(now, |i| f(&mut i.world))
+    }
+
+    /// Like `update`, with the mock generator too. `None` when MOCK_MODE is off.
+    pub fn update_mock<R>(
+        &self,
+        now: DateTime<Utc>,
+        f: impl FnOnce(&mut Generator, &mut World) -> R,
+    ) -> Option<R> {
+        if !self.mock_enabled {
+            return None;
+        }
+        self.write(now, |i| {
+            let Inner { world, mock } = i;
+            mock.as_mut().map(|g| f(g, world))
+        })
+    }
+
     /// One scheduler tick: the mock generator acts (if enabled), then rules settle.
     pub fn tick(&self, now: DateTime<Utc>) {
-        match &self.mock {
-            Some(g) => {
-                let mut g = g.lock().unwrap_or_else(|e| e.into_inner());
-                self.update(now, |w| g.tick(w, now));
+        self.write(now, |i| {
+            if let Some(g) = i.mock.as_mut() {
+                g.tick(&mut i.world, now);
             }
-            None => self.update(now, |_| ()),
-        }
+        })
+    }
+}
+
+impl Inner {
+    fn snapshot(&self, now: DateTime<Utc>) -> Snapshot {
+        let mut s = self.world.snapshot(now);
+        s.mock = self.mock.as_ref().map(|g| g.state(&self.world, now));
+        s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vote_on_unknown_report_is_not_found() {
+        let cfg = Config::from_lookup(|_| None).unwrap();
+        let t0 = "2026-11-22T00:00:00Z".parse().unwrap();
+        let e = Engine::new(&cfg, t0);
+        let r = e.update(t0, |w| w.vote("rpt_404", "user_01", Vote::Confirm, t0));
+        assert_eq!(r.unwrap_err(), VoteError::NotFound);
     }
 }

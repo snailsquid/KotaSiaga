@@ -15,9 +15,11 @@ fn not_found() -> ApiError {
     ApiError::new(ErrorCode::NotFound, "Endpoint tidak ditemukan")
 }
 
-fn envelope(st: &AppState, data: MockState) -> Json<Envelope<MockState>> {
+/// Reads the published snapshot only: never takes the writer lock and never changes state.
+fn envelope(st: &AppState) -> Result<Json<Envelope<MockState>>, ApiError> {
     let s = st.engine.snapshot();
-    Json(Envelope {
+    let data = s.mock.clone().ok_or_else(not_found)?;
+    Ok(Json(Envelope {
         data,
         meta: Meta {
             seq: s.seq,
@@ -26,16 +28,11 @@ fn envelope(st: &AppState, data: MockState) -> Json<Envelope<MockState>> {
             stale: s.stale,
             reset: None,
         },
-    })
+    }))
 }
 
 pub async fn state(State(st): State<AppState>) -> Result<Json<Envelope<MockState>>, ApiError> {
-    let g = st.engine.mock.as_ref().ok_or_else(not_found)?;
-    let now = chrono::Utc::now();
-    let data = st.engine.update(now, |w| {
-        g.lock().unwrap_or_else(|e| e.into_inner()).state(w, now)
-    });
-    Ok(envelope(&st, data))
+    envelope(&st)
 }
 
 #[derive(Deserialize)]
@@ -49,7 +46,9 @@ pub async fn scenario(
     State(st): State<AppState>,
     body: Result<Json<ScenarioRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<(StatusCode, Json<Envelope<MockState>>), ApiError> {
-    let g = st.engine.mock.as_ref().ok_or_else(not_found)?;
+    if !st.engine.mock_enabled() {
+        return Err(not_found());
+    }
     let Json(req) = body
         .map_err(|e| ApiError::new(ErrorCode::ValidationError, format!("Body tidak valid: {e}")))?;
     if !SCENARIOS.contains(&req.name.as_str()) {
@@ -74,11 +73,10 @@ pub async fn scenario(
         }
     };
     let now = chrono::Utc::now();
-    let data = st.engine.update(now, |w| {
-        let mut g = g.lock().unwrap_or_else(|e| e.into_inner());
-        g.scenario(w, &req.name, at, now).map(|_| g.state(w, now))
-    });
-    let data = data.map_err(|m| ApiError::new(ErrorCode::ValidationError, m))?;
+    st.engine
+        .update_mock(now, |g, w| g.scenario(w, &req.name, at, now))
+        .ok_or_else(not_found)?
+        .map_err(|m| ApiError::new(ErrorCode::ValidationError, m))?;
     tracing::info!(scenario = req.name, "mock scenario triggered");
-    Ok((StatusCode::ACCEPTED, envelope(&st, data)))
+    Ok((StatusCode::ACCEPTED, envelope(&st)?))
 }

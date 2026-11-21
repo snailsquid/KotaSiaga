@@ -25,6 +25,8 @@ pub enum VoteOutcome {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum VoteError {
+    /// No live report with that id (never existed, or already expired/archived).
+    NotFound,
     NotWaiting,
     OwnReport,
     AlreadyVoted,
