@@ -66,6 +66,7 @@ interface Store {
   alerts: Alert[];
   unread: number;
   markAlertRead: (id: string) => void;
+  isAlertRead: (id: string) => boolean;
   refreshAccountData: () => void;
   refreshAll: () => void;
   // user and ui
@@ -525,6 +526,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     alerts,
     unread,
     markAlertRead: (id) => setReadAlerts((s) => new Set(s).add(id)),
+    isAlertRead: (id) => readAlerts.has(id),
     refreshAccountData,
     refreshAll,
     location,

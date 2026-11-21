@@ -118,7 +118,7 @@ export class MockBackend {
   private alerts = new Map<string, Alert[]>();
   private users = new Map<string, number>(); // user id -> reputation
   private tokens = new Map<string, string>(); // token -> user id
-  private storm = { lat: -6.8935, lon: 107.599, base: 46, until: 0 };
+  private storm = { lat: -6.8935, lon: 107.599, base: 55, until: 0 };
   private temp = 24;
   private tickN = 0;
   private quietTicks = 0;
@@ -171,7 +171,7 @@ export class MockBackend {
       r.expires_at = new Date(now + (10 + k * 4) * 60000).toISOString();
       this.reports.set(r.id, r);
     });
-    this.storm = { lat: -6.8935, lon: 107.599, base: 46, until: now + 60000 };
+    this.storm = { lat: -6.8935, lon: 107.599, base: 55, until: now + 90000 };
     this.recomputeRisk(true);
     this.push('weather.updated', 'weather', 'Cuaca diperbarui');
   }
@@ -443,6 +443,7 @@ export class MockBackend {
         }
     }
     let transitions = 0;
+    const raised: { id: string; center: Point; level: RiskLevel }[] = [];
     for (let i = 0; i < ROWS; i++) {
       for (let j = 0; j < COLS; j++) {
         const id = `c_${i}_${j}`;
@@ -468,31 +469,34 @@ export class MockBackend {
         if (!initial && prev && prev.risk_level !== level) {
           transitions += 1;
           this.push('risk.changed', id, `Risiko berubah: ${RISK_LABEL[level]}`);
-          this.alertSubscribers(id, center, level);
+          if (RISK_ORDER[level] > RISK_ORDER[prev.risk_level]) raised.push({ id, center, level });
         }
       }
     }
     if (transitions > 0) this.lastRiskTransition = now;
+    this.alertSubscribers(raised);
   }
 
-  private alertSubscribers(cellId: string, center: Point, level: RiskLevel) {
-    if (level === 'safe') return;
+  /** At most one alert per watched area per recompute: the worst cell that got riskier inside it. */
+  private alertSubscribers(raised: { id: string; center: Point; level: RiskLevel }[]) {
     for (const [user, list] of this.subs) {
       for (const s of list) {
-        if (distanceM(s, center) <= s.radius_m + 250) {
-          const a: Alert = {
-            id: this.id('alr'),
-            subscription_id: s.id,
-            cell_id: cellId,
-            risk_level: level,
-            at: new Date().toISOString(),
-            message: `${RISK_LABEL[level]} di sekitar ${s.name}${nearestStreet(center) ? ', dekat ' + nearestStreet(center) : ''}.`,
-          };
-          const arr = this.alerts.get(user) ?? [];
-          // one alert per subscription per cell transition is enough
-          arr.unshift(a);
-          this.alerts.set(user, arr.slice(0, 100));
-        }
+        const inside = raised.filter((r) => r.level !== 'safe' && distanceM(s, r.center) <= s.radius_m + 250);
+        if (inside.length === 0) continue;
+        inside.sort((a, b) => RISK_ORDER[b.level] - RISK_ORDER[a.level] || distanceM(s, a.center) - distanceM(s, b.center));
+        const { id: cellId, center, level } = inside[0];
+        const street = nearestStreet(center);
+        const a: Alert = {
+          id: this.id('alr'),
+          subscription_id: s.id,
+          cell_id: cellId,
+          risk_level: level,
+          at: new Date().toISOString(),
+          message: `${RISK_LABEL[level]} di sekitar ${s.name}${street ? ', dekat ' + street : ''}.`,
+        };
+        const arr = this.alerts.get(user) ?? [];
+        arr.unshift(a);
+        this.alerts.set(user, arr.slice(0, 100));
       }
     }
   }
@@ -615,7 +619,7 @@ export class MockBackend {
     switch (name) {
       case 'rain_storm': {
         const p = at ?? offset(MOCK_ME, (this.rnd() - 0.5) * 2500, (this.rnd() - 0.5) * 2500);
-        this.storm = { lat: p.lat, lon: p.lon, base: 52, until: Date.now() + 120000 };
+        this.storm = { lat: p.lat, lon: p.lon, base: 55, until: Date.now() + 120000 };
         this.push('weather.updated', 'weather', 'Hujan badai');
         break;
       }

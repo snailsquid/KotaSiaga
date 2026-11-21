@@ -25,7 +25,7 @@ export type PendingAction =
 
 export type SheetView =
   | { view: 'home' }
-  | { view: 'search' }
+  | { view: 'search'; pickFor?: { field: 'origin' | 'dest'; dest: PlaceRef; origin: PlaceRef | null } }
   | { view: 'place'; place: PlaceRef }
   | { view: 'route'; dest: PlaceRef; origin: PlaceRef | null; selected?: string }
   | { view: 'route_detail'; dest: PlaceRef; origin: PlaceRef | null; routeId: string }
