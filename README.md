@@ -44,9 +44,11 @@ DATABASE_PATH=./core.db PORT=8080 cargo run -p core-service
 
 ## Deploy (Volta host or STB)
 
-CI (`.github/workflows/ci.yml`) tests every push and, on `master`, builds multi-arch images
-(`linux/amd64` + `linux/arm64`, one tag) on native GitHub runners and pushes them to GHCR.
-Any host (x86 server or ARM STB) runs the same compose file and Docker pulls the matching arch.
+CI (`.github/workflows/ci.yml`) runs on **Gitea Actions on volta**: Gitea pull-mirrors this repo
+every 10 minutes and its runner executes `.github/workflows`. It tests every pushed branch and, on
+`master`, builds `linux/amd64` images and pushes them to `ghcr.io/snailsquid` (secret `GHCR_TOKEN`,
+a classic PAT with `write:packages`). arm64 images for an ARM STB come back once GitHub Actions
+works for this repo; the workflow stays GitHub-compatible.
 Never compile Rust on the deploy host: `docker-compose.yml` has no `build:` keys on purpose.
 
 ### volta (Coolify)
@@ -55,10 +57,10 @@ Coolify on volta runs this repo as a **git-based** Docker Compose app (`kotasiag
 `master`, file `/docker-compose.yml`). It has to be git-based because the gateway bind-mounts
 `./gateway/nginx.conf` from the checkout. Coolify only sees compose changes once they are on `master`.
 
-After the images are pushed, the `deploy` job runs on the self-hosted runner on volta
-(labels `self-hosted, linux, x64, volta, kotasiaga`) and calls Coolify's deploy API.
+After the images are pushed, the `deploy` job runs on the runner labelled `volta` and calls
+Coolify's deploy API.
 `core-service` and `identity-service` use `pull_policy: always`, so each deploy pulls `:latest`.
-GitHub environment `volta` holds these secrets; the job skips with a warning while any is unset:
+These repo secrets are needed (the job skips with a warning while any is unset):
 
 | Secret | Value |
 |---|---|

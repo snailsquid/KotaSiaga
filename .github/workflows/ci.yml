@@ -1,14 +1,15 @@
 name: ci
 
+# Runs on Gitea Actions on volta (Gitea pull-mirrors this repo and reads .github/workflows).
+# Kept compatible with GitHub Actions. The Gitea mirror has no pull requests, so `test` runs on
+# every pushed branch; images and deploy run only on master.
 on:
   push:
-    branches: [master]
   pull_request:
 
-# One deploy at a time on master; a newer push cancels an older run still building.
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+env:
+  # Images live in GHCR under the GitHub owner, whichever CI pushes them.
+  IMAGE_REGISTRY: ghcr.io/snailsquid
 
 jobs:
   test:
@@ -23,87 +24,48 @@ jobs:
       - run: cargo test --locked
       - run: npx -y @redocly/cli@1.34.5 lint openapi.yaml
 
-  # Multi-arch images: one tag per service holding linux/amd64 and linux/arm64.
-  # Each arch builds natively on its own runner (no QEMU; emulated Rust builds are very slow),
-  # then `merge` joins the two digests under one tag. Docker pulls the right one per machine.
+  # linux/amd64 only: volta is x86 and there is no arm runner on Gitea.
+  # arm64 (for an ARM STB) comes back with GitHub Actions: add a linux/arm64 leg on
+  # ubuntu-24.04-arm and merge both digests under one tag with `docker buildx imagetools create`.
   image:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: test
-    runs-on: ${{ matrix.runner }}
-    permissions: { contents: read, packages: write }
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         service: [core-service, identity-service]
-        platform: [linux/amd64, linux/arm64]
-        include:
-          - { platform: linux/amd64, runner: ubuntu-24.04, arch: amd64 }
-          - { platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64 }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      # Gitea's built-in token cannot push to GHCR: GHCR_TOKEN is a classic PAT with write:packages.
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: snailsquid
+          password: ${{ secrets.GHCR_TOKEN }}
       - id: name
         run: |
           short="${{ matrix.service }}"; short="${short%-service}"
-          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kotasiaga-${short}" >> "$GITHUB_OUTPUT"
-      - id: build
-        uses: docker/build-push-action@v6
+          echo "image=${IMAGE_REGISTRY}/kotasiaga-${short}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64
           build-args: SERVICE=${{ matrix.service }}
-          outputs: type=image,name=${{ steps.name.outputs.image }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}-${{ matrix.arch }}
-      - run: |
-          mkdir -p /tmp/digests
-          echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.service }}-${{ matrix.arch }}"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: digest-${{ matrix.service }}-${{ matrix.arch }}
-          path: /tmp/digests/*
-          retention-days: 1
-
-  merge:
-    needs: image
-    runs-on: ubuntu-24.04
-    permissions: { contents: read, packages: write }
-    strategy:
-      matrix:
-        service: [core-service, identity-service]
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: digest-${{ matrix.service }}-*
-          path: /tmp/digests
-          merge-multiple: true
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - run: |
-          short="${{ matrix.service }}"; short="${short%-service}"
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kotasiaga-${short}"
-          docker buildx imagetools create \
-            -t "$image:latest" -t "$image:${GITHUB_SHA}" \
-            $(for f in /tmp/digests/*; do echo "$image@$(cat "$f")"; done)
-          docker buildx imagetools inspect "$image:latest"
+          push: true
+          tags: |
+            ${{ steps.name.outputs.image }}:latest
+            ${{ steps.name.outputs.image }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ steps.name.outputs.image }}:buildcache
+          cache-to: type=registry,ref=${{ steps.name.outputs.image }}:buildcache,mode=max
 
   # CD: ask Coolify on volta to redeploy the compose stack, which pulls the images pushed above.
-  # Runs on the self-hosted runner on volta (Coolify is private there). Environment `volta` holds
-  # COOLIFY_URL, COOLIFY_RESOURCE_UUID and COOLIFY_TOKEN (API token with deploy permission).
-  # Skips with a warning while any of them is unset.
+  # Runs on the runner on volta (label `volta`), since Coolify is private there. Reads repo secrets
+  # COOLIFY_URL, COOLIFY_RESOURCE_UUID and COOLIFY_TOKEN; skips with a warning while any is unset.
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: merge
-    runs-on: [self-hosted, linux, x64, volta, kotasiaga]
-    environment: volta
+    needs: image
+    runs-on: volta
     steps:
       - name: Trigger Coolify deploy
         env:
