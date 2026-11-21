@@ -26,6 +26,7 @@ export function FilterRow() {
           icon="tune"
           mode="flat"
           elevated
+          hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
           selected={n > 0}
           showSelectedCheck={false}
           onPress={() => s.go({ view: 'filter' })}
@@ -48,6 +49,7 @@ export function FilterRow() {
             key={k}
             mode="flat"
             elevated
+            hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
             selected={on}
             showSelectedCheck
             onPress={() => s.setFilters({ ...s.filters, cats: on ? s.filters.cats.filter((x) => x !== k) : [...s.filters.cats, k] })}

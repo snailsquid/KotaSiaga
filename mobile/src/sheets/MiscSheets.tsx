@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Button, Checkbox, Divider, RadioButton, Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthProvider';
@@ -13,7 +13,7 @@ import { isActive, matchesFilter, useStore } from '../state/AppStore';
 import type { Filters, SheetEntry, StatusFilter } from '../state/types';
 import { RiskBadge } from '../components/RiskBadge';
 import { DISASTER_LABEL } from '../map/KsMap';
-import { Muted, ReportRow, SheetHeader, styles, useAppTheme } from './common';
+import { Muted, ReportRow, SheetHeader, styles, useAppTheme, HIT } from './common';
 
 // ---------------------------------------------------------------- sign_in (spec §8)
 export function SignInSheet() {
@@ -28,7 +28,7 @@ export function SignInSheet() {
         Masuk untuk {e.reason}
       </Text>
       <Muted>Akun membuat laporanmu lebih dipercaya warga lain. Namamu tidak ditampilkan. Di peta kamu tampil sebagai “Warga”.</Muted>
-      <Button
+      <Button hitSlop={HIT}
         mode="outlined"
         icon={() => <MaterialCommunityIcons name="google" size={18} color={t.colors.onSurface} />}
         textColor={t.colors.onSurface}
@@ -49,7 +49,7 @@ export function SignInSheet() {
       >
         Masuk dengan Google
       </Button>
-      <Button mode="text" onPress={() => s.back()} disabled={busy}>
+      <Button hitSlop={HIT} mode="text" onPress={() => s.back()} disabled={busy}>
         Nanti saja
       </Button>
     </>
@@ -77,7 +77,7 @@ export function ListSheet() {
         filtered ? (
           <>
             <Muted>Tidak ada laporan yang cocok dengan filter.</Muted>
-            <Button mode="outlined" style={{ alignSelf: 'flex-start' }} onPress={() => s.setFilters({ cats: [], status: 'all' })}>
+            <Button hitSlop={HIT} mode="outlined" style={{ alignSelf: 'flex-start' }} onPress={() => s.setFilters({ cats: [], status: 'all' })}>
               Hapus filter
             </Button>
           </>
@@ -90,7 +90,7 @@ export function ListSheet() {
             <ReportRow key={r.id} r={r} />
           ))}
           {shown < list.length ? (
-            <Button mode="text" onPress={() => setShown((n) => n + PAGE)}>
+            <Button hitSlop={HIT} mode="text" onPress={() => setShown((n) => n + PAGE)}>
               Muat lebih banyak
             </Button>
           ) : null}
@@ -119,7 +119,7 @@ export function FilterSheet() {
         <Text variant="titleLarge" accessibilityRole="header">
           Filter laporan
         </Text>
-        <Button mode="text" onPress={() => setDraft({ cats: [], status: 'all' })}>
+        <Button hitSlop={HIT} mode="text" onPress={() => setDraft({ cats: [], status: 'all' })}>
           Atur ulang
         </Button>
       </View>
@@ -130,21 +130,26 @@ export function FilterSheet() {
         {CATEGORY_ORDER.map((k) => {
           const on = draft.cats.includes(k);
           const count = active.filter((r) => r.category === k).length;
+          const toggle = () => setDraft({ ...draft, cats: on ? draft.cats.filter((x) => x !== k) : [...draft.cats, k] });
           return (
-            <View key={k} style={{ flexDirection: 'row', alignItems: 'center', gap: 16, minHeight: 56 }}>
+            <Pressable
+              key={k}
+              onPress={toggle}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: on }}
+              accessibilityLabel={`${CATEGORIES[k].label}, ${count} laporan`}
+              android_ripple={{ color: t.colors.surfaceContainerHighest }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 16, minHeight: 56 }}
+            >
               <MaterialCommunityIcons name={CATEGORIES[k].icon as any} size={24} color={t.colors.onSurfaceVariant} />
-              <View style={{ flex: 1 }}>
-                <Checkbox.Item
-                  label={`${CATEGORIES[k].label}`}
-                  status={on ? 'checked' : 'unchecked'}
-                  onPress={() => setDraft({ ...draft, cats: on ? draft.cats.filter((x) => x !== k) : [...draft.cats, k] })}
-                  accessibilityLabel={`${CATEGORIES[k].label}, ${count} laporan`}
-                  style={{ paddingHorizontal: 0 }}
-                  labelVariant="bodyLarge"
-                />
-              </View>
+              <Text variant="bodyLarge" style={{ flex: 1 }}>
+                {CATEGORIES[k].label}
+              </Text>
               <Muted>{count}</Muted>
-            </View>
+              <View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+                <Checkbox status={on ? 'checked' : 'unchecked'} onPress={toggle} />
+              </View>
+            </Pressable>
           );
         })}
       </View>
@@ -159,7 +164,7 @@ export function FilterSheet() {
           ))}
         </RadioButton.Group>
       </View>
-      <Button
+      <Button hitSlop={HIT}
         mode="contained"
         disabled={n === 0}
         onPress={() => {
@@ -196,16 +201,16 @@ export function CellSheet() {
           {reports.map((r) => (
             <ReportRow key={r.id} r={r} />
           ))}
-          <Button mode="text" compact style={{ alignSelf: 'flex-start' }} onPress={() => s.go({ view: 'list' })}>
+          <Button hitSlop={HIT} mode="text" compact style={{ alignSelf: 'flex-start' }} onPress={() => s.go({ view: 'list' })}>
             Lihat semua
           </Button>
         </View>
       ) : null}
       <View style={styles.buttonsRow}>
-        <Button mode="contained" icon="directions" onPress={() => s.go({ view: 'route', dest: { kind: 'pin', name: d.street ?? 'Area ini', lat: e.at.lat, lon: e.at.lon }, origin: null })}>
+        <Button hitSlop={HIT} mode="contained" icon="directions" onPress={() => s.go({ view: 'route', dest: { kind: 'pin', name: d.street ?? 'Area ini', lat: e.at.lat, lon: e.at.lon }, origin: null })}>
           Rute ke sini
         </Button>
-        <Button mode="outlined" icon="bell-outline" onPress={() => s.need({ type: 'watch', center: e.at, name: d.street ?? d.district }, 'memantau area')}>
+        <Button hitSlop={HIT} mode="outlined" icon="bell-outline" onPress={() => s.need({ type: 'watch', center: e.at, name: d.street ?? d.district }, 'memantau area')}>
           Pantau area ini
         </Button>
       </View>
@@ -231,7 +236,7 @@ export function DisasterSheet() {
       <SheetHeader title={DISASTER_LABEL[d.type] ?? 'Sinyal bencana'} subtitle={`Sumber: PetaBencana · mulai ${ago(d.reported_at)}`} onClose={s.home} />
       <Text variant="titleMedium">{d.status === 'active' ? 'Aktif' : `Selesai ${d.resolved_at ? ago(d.resolved_at) : ''}`}</Text>
       <Muted>Area yang terdampak ditandai di peta. Rute yang disarankan otomatis menghindari area ini.</Muted>
-      <Button mode="contained" icon="directions" style={{ alignSelf: 'flex-start' }} onPress={() => s.go({ view: 'search' })}>
+      <Button hitSlop={HIT} mode="contained" icon="directions" style={{ alignSelf: 'flex-start' }} onPress={() => s.go({ view: 'search' })}>
         Rute menghindari area ini
       </Button>
     </>
@@ -251,7 +256,7 @@ export function LocationIntroSheet() {
       {ApiService.isMock && !config.useDeviceLocation ? (
         <Muted variant="bodySmall">Mode demo: posisimu ditaruh di Bandung (dekat Jl. Pasteur).</Muted>
       ) : null}
-      <Button
+      <Button hitSlop={HIT}
         mode="contained"
         onPress={async () => {
           const ok = await s.requestLocation();
@@ -261,7 +266,7 @@ export function LocationIntroSheet() {
       >
         Izinkan lokasi
       </Button>
-      <Button mode="text" onPress={s.home}>
+      <Button hitSlop={HIT} mode="text" onPress={s.home}>
         Nanti saja
       </Button>
     </>

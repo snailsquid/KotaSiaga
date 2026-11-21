@@ -11,7 +11,7 @@ import { RISK_LABEL } from '../domain/risk';
 import { useStore } from '../state/AppStore';
 import type { SheetEntry } from '../state/types';
 import { RiskBadge } from '../components/RiskBadge';
-import { InlineError, Muted, Row, SectionLabel, SheetHeader, styles, useAppTheme } from './common';
+import { InlineError, Muted, Row, SectionLabel, SheetHeader, styles, useAppTheme, HIT, CHIP_HIT } from './common';
 
 function subRisk(s: ReturnType<typeof useStore>, sub: Subscription) {
   return s.data.cells.get(ApiService.cellAt(sub))?.risk_level ?? null;
@@ -30,7 +30,7 @@ export function AlertsSheet() {
         <Text variant="titleLarge" accessibilityRole="header">
           Notifikasi
         </Text>
-        <Button mode="text" icon="account-circle" onPress={() => s.go({ view: 'account' })}>
+        <Button hitSlop={HIT} mode="text" icon="account-circle" onPress={() => s.go({ view: 'account' })}>
           Akun
         </Button>
       </View>
@@ -56,7 +56,7 @@ export function AlertsSheet() {
               </Chip>
             );
           })}
-          <Chip mode="outlined" icon="plus" onPress={() => s.runPending({ type: 'watch', center: s.focus })} textStyle={{ color: t.colors.primary }}>
+          <Chip hitSlop={CHIP_HIT} mode="outlined" icon="plus" onPress={() => s.runPending({ type: 'watch', center: s.focus })} textStyle={{ color: t.colors.primary }}>
             Tambah
           </Chip>
         </View>
@@ -64,7 +64,7 @@ export function AlertsSheet() {
       {s.alerts.length === 0 ? (
         <>
           <Muted>Belum ada notifikasi. Pantau area untuk menerima peringatan.</Muted>
-          <Button mode="outlined" style={{ alignSelf: 'flex-start' }} onPress={() => s.runPending({ type: 'watch', center: s.focus })}>
+          <Button hitSlop={HIT} mode="outlined" style={{ alignSelf: 'flex-start' }} onPress={() => s.runPending({ type: 'watch', center: s.focus })}>
             Pantau area
           </Button>
         </>
@@ -105,7 +105,7 @@ export function AccountSheet() {
     return (
       <>
         <SheetHeader title="Akun" onClose={s.back} />
-        <Button mode="contained" onPress={() => s.need({ type: 'alerts' }, 'melihat notifikasi')}>
+        <Button hitSlop={HIT} mode="contained" onPress={() => s.need({ type: 'alerts' }, 'melihat notifikasi')}>
           Masuk dengan Google
         </Button>
       </>
@@ -133,15 +133,15 @@ export function AccountSheet() {
         <Row icon="bell-outline" title="Notifikasi" onPress={() => s.go({ view: 'alerts' })} />
         <Row icon="information-outline" title="Tentang aplikasi" onPress={() => s.go({ view: 'about' })} />
       </View>
-      <Button mode="outlined" icon="logout" style={{ alignSelf: 'flex-start' }} onPress={() => setConfirm(true)}>
+      <Button hitSlop={HIT} mode="outlined" icon="logout" style={{ alignSelf: 'flex-start' }} onPress={() => setConfirm(true)}>
         Keluar
       </Button>
       <Portal>
         <Dialog visible={confirm} onDismiss={() => setConfirm(false)}>
           <Dialog.Title>Keluar dari akun?</Dialog.Title>
           <Dialog.Actions>
-            <Button onPress={() => setConfirm(false)}>Batal</Button>
-            <Button
+            <Button hitSlop={HIT} onPress={() => setConfirm(false)}>Batal</Button>
+            <Button hitSlop={HIT}
               onPress={async () => {
                 setConfirm(false);
                 await auth.signOut();
@@ -215,7 +215,7 @@ export function SubscriptionsSheet() {
           style={{ minHeight: 56, borderWidth: 1, borderColor: t.colors.outline, borderRadius: 4, paddingHorizontal: 16, fontSize: 16, color: t.colors.onSurface }}
         />
         {error ? <InlineError message={error} /> : null}
-        <Button
+        <Button hitSlop={HIT}
           mode="contained"
           loading={saving}
           disabled={!name.trim() || saving}
@@ -266,7 +266,7 @@ export function SubscriptionsSheet() {
           );
         })}
       </View>
-      <Button mode="contained" icon="plus" style={{ alignSelf: 'flex-start' }} onPress={() => s.dispatch({ type: 'replace', to: { view: 'subscriptions', add: { center: s.focus } }, snap: 1 })}>
+      <Button hitSlop={HIT} mode="contained" icon="plus" style={{ alignSelf: 'flex-start' }} onPress={() => s.dispatch({ type: 'replace', to: { view: 'subscriptions', add: { center: s.focus } }, snap: 1 })}>
         Tambah area
       </Button>
     </>

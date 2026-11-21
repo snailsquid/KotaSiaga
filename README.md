@@ -4,6 +4,8 @@ Kondisi kota dan rute aman untuk Bandung: citizen reports, verification, per-cel
 (Aman / Waspada / Bahaya), weather, disaster signals and safe routes. Rules for every
 contributor and agent are in [AGENTS.md](AGENTS.md). The API contract is [openapi.yaml](openapi.yaml).
 
+The mobile app (Expo, frontend only for now) lives in [mobile/](mobile/README.md).
+
 ## Stack
 
 Rust (Tokio + Axum), SQLite in WAL mode, Nginx gateway, Cloudflare tunnel, Docker on the group STB.

@@ -7,7 +7,7 @@ import { distanceM } from '../domain/geo';
 import { ago, expiresIn, formatDistance } from '../domain/format';
 import { isActive, placeLabel, reportTitle, useStore } from '../state/AppStore';
 import type { SheetEntry } from '../state/types';
-import { InlineError, Muted, SheetHeader, styles, useAppTheme } from './common';
+import { InlineError, Muted, SheetHeader, styles, useAppTheme, HIT } from './common';
 
 /** Report detail (spec §7.3 with §12.1, §12.3, §12b.2). */
 export function ReportSheet() {
@@ -81,10 +81,10 @@ export function ReportSheet() {
           <>
             <Text variant="titleMedium">{cat.ask(place)}</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Button mode="contained" style={{ flex: 1 }} onPress={() => send('confirm')} disabled={s.busy}>
+              <Button hitSlop={HIT} mode="contained" style={{ flex: 1 }} onPress={() => send('confirm')} disabled={s.busy}>
                 {cat.yes}
               </Button>
-              <Button mode="outlined" style={{ flex: 1 }} onPress={() => send('dispute')} disabled={s.busy}>
+              <Button hitSlop={HIT} mode="outlined" style={{ flex: 1 }} onPress={() => send('dispute')} disabled={s.busy}>
                 {cat.no}
               </Button>
             </View>
@@ -104,7 +104,7 @@ export function ReportSheet() {
         {mine && !expired ? <Muted>Ini laporanmu. Warga di sekitar sedang diminta memastikan, kami kabari kalau sudah dipastikan.</Muted> : null}
       </View>
 
-      <Button
+      <Button hitSlop={HIT}
         mode="outlined"
         icon="share-variant"
         style={{ alignSelf: 'flex-start' }}

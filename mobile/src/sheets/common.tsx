@@ -9,6 +9,10 @@ import { formatDistance } from '../domain/format';
 import { placeLabel, reportTitle, useStore } from '../state/AppStore';
 import type { AppTheme } from '../theme/theme';
 
+/** Expands 40 dp MD3 buttons and 32 dp chips to at least 44 dp touch targets (spec §11). */
+export const HIT = { top: 4, bottom: 4, left: 0, right: 0 };
+export const CHIP_HIT = { top: 6, bottom: 6, left: 0, right: 0 };
+
 export function useAppTheme() {
   return useTheme<AppTheme>();
 }

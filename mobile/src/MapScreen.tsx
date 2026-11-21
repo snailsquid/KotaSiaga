@@ -59,7 +59,10 @@ export function MapScreen() {
   }, [menuOpen, layersOpen, view, s]);
 
   useEffect(() => {
-    if (view !== 'search') searchRef.current?.blur();
+    if (view !== 'search') {
+      searchRef.current?.blur();
+      setQuery('');
+    }
     if (view !== 'home') setLayersOpen(false);
   }, [view]);
 

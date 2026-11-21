@@ -10,7 +10,7 @@ import { formatDistance, hourLabel } from '../domain/format';
 import { WEATHER, riskHeadline, riskWhy } from '../domain/risk';
 import { canConfirm, isActive, matchesFilter, placeLabel, useStore } from '../state/AppStore';
 import { RiskBadge } from '../components/RiskBadge';
-import { Muted, Placeholder, ReportRow, SectionLabel, styles, useAppTheme } from './common';
+import { Muted, Placeholder, ReportRow, SectionLabel, styles, useAppTheme, HIT } from './common';
 
 /** The report nearby that the user can help confirm (spec §12.2). */
 export function useVerifyTarget(): Report | null {
@@ -39,14 +39,14 @@ export function VerifyCard({ r }: { r: Report }) {
         <Text variant="titleMedium">{cat.ask(placeLabel(r))}</Text>
       </View>
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Button mode="contained" style={{ flex: 1 }} onPress={() => vote('confirm')} disabled={s.busy}>
+        <Button hitSlop={HIT} mode="contained" style={{ flex: 1 }} onPress={() => vote('confirm')} disabled={s.busy}>
           {cat.yes}
         </Button>
-        <Button mode="outlined" style={{ flex: 1 }} onPress={() => vote('dispute')} disabled={s.busy}>
+        <Button hitSlop={HIT} mode="outlined" style={{ flex: 1 }} onPress={() => vote('dispute')} disabled={s.busy}>
           {cat.no}
         </Button>
       </View>
-      <Button mode="text" compact onPress={() => s.dismiss(r.id)} style={{ alignSelf: 'center', marginTop: -4 }}>
+      <Button hitSlop={HIT} mode="text" compact onPress={() => s.dismiss(r.id)} style={{ alignSelf: 'center', marginTop: -4 }}>
         Tidak tahu
       </Button>
     </View>
@@ -124,12 +124,12 @@ export function HomeSheet() {
             <SectionLabel>Laporan terdekat</SectionLabel>
             {!s.data.loaded ? <Placeholder /> : nearby.length === 0 ? <Muted>Belum ada laporan di area ini.</Muted> : nearby.map((r) => <ReportRow key={r.id} r={r} />)}
             {nearby.length > 0 ? (
-              <Button mode="text" compact onPress={() => s.go({ view: 'list' })} style={{ alignSelf: 'flex-start' }}>
+              <Button hitSlop={HIT} mode="text" compact onPress={() => s.go({ view: 'list' })} style={{ alignSelf: 'flex-start' }}>
                 Lihat semua laporan
               </Button>
             ) : null}
           </View>
-          <Button
+          <Button hitSlop={HIT}
             mode="outlined"
             icon="bell-outline"
             style={{ alignSelf: 'flex-start' }}

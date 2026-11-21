@@ -9,7 +9,6 @@ import { config } from '../config';
 import { CATEGORIES } from '../domain/categories';
 import { circlePolygon, toLatLng } from '../domain/geo';
 import { spokenDistance } from '../domain/format';
-import { RISK_LABEL } from '../domain/risk';
 import { isActive, matchesFilter, placeLabel, useStore } from '../state/AppStore';
 import { riskColors, theme } from '../theme/theme';
 import { ClusterBubble, PointMarker, ReportPin } from './PinView';
@@ -50,6 +49,7 @@ export function KsMap({ sheetHalfPx }: { sheetHalfPx: number }) {
   const regionRef = useRef(region);
   regionRef.current = region;
   const lastOverlayPress = useRef(0);
+  const lastLive = useRef(0);
   const reduceMotion = useRef(false);
   const seenReports = useRef<Set<string> | null>(null);
   const { height } = useWindowDimensions();
@@ -151,7 +151,10 @@ export function KsMap({ sheetHalfPx }: { sheetHalfPx: number }) {
       showsPointsOfInterests={false}
       rotateEnabled
       onRegionChange={(r) => {
-        if (addMode || pickMode) s.setLiveCenter({ lat: r.latitude, lon: r.longitude });
+        // Live circle / picker label while panning, throttled so the whole UI does not re-render every frame.
+        if (!(addMode || pickMode) || Date.now() - lastLive.current < 120) return;
+        lastLive.current = Date.now();
+        s.setLiveCenter({ lat: r.latitude, lon: r.longitude });
       }}
       onRegionChangeComplete={(r) => {
         // New data for the area appears after the map stops moving (spec §4.2).
@@ -409,4 +412,3 @@ const styles = StyleSheet.create({
   meDot: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#4285F4', borderWidth: 3, borderColor: '#FFFFFF' },
 });
 
-export { RISK_LABEL };

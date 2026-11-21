@@ -40,7 +40,7 @@ export function MapControls({ sheetTop, visible, showLapor, layersOpen, onToggle
     <Animated.View style={[styles.wrap, style]} pointerEvents="box-none">
       <FAB
         icon="layers"
-        size="small"
+        customSize={44}
         variant="surface"
         onPress={onToggleLayers}
         accessibilityLabel="Lapisan peta"

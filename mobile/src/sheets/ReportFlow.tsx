@@ -9,7 +9,7 @@ import { ago, formatDistance } from '../domain/format';
 import { isActive, placeLabel, reportTitle, useStore } from '../state/AppStore';
 import { ApiService } from '../api/ApiService';
 import type { SheetEntry } from '../state/types';
-import { InlineError, Muted, SheetHeader, statusShort, useAppTheme } from './common';
+import { InlineError, Muted, SheetHeader, statusShort, useAppTheme, HIT } from './common';
 
 /** "Apa yang kamu lihat?": one tap on a tile sends the report (spec §7.6, option A). */
 export function QuickReportSheet() {
@@ -42,7 +42,7 @@ export function QuickReportSheet() {
           <Text variant="bodyLarge">{d ? `${d.street ?? 'Titik di peta'}, ${d.district}` : 'Lokasi belum diketahui'}</Text>
           <Muted>{e.at ? 'Titik yang kamu pilih' : at ? 'Lokasimu sekarang' : 'Pilih titik di peta'}</Muted>
         </View>
-        <Button mode="text" compact onPress={() => s.go({ view: 'pick_location', at: at ?? s.focus })} accessibilityLabel="Ubah lokasi laporan">
+        <Button hitSlop={HIT} mode="text" compact onPress={() => s.go({ view: 'pick_location', at: at ?? s.focus })} accessibilityLabel="Ubah lokasi laporan">
           Ubah
         </Button>
       </View>
@@ -82,7 +82,7 @@ export function PickLocationSheet() {
       <Muted>
         {d.street ?? 'Titik di peta'}, {d.district}
       </Muted>
-      <Button
+      <Button hitSlop={HIT}
         mode="contained"
         onPress={() => {
           s.dispatch({ type: 'back' });
@@ -102,7 +102,7 @@ export function DuplicateSheet() {
   const r = s.data.reports.find((x) => x.id === e.dupId);
   if (!r) {
     return (
-      <Button mode="contained" onPress={() => s.need({ type: 'submit', cat: e.cat, at: e.at }, 'mengirim laporan')}>
+      <Button hitSlop={HIT} mode="contained" onPress={() => s.need({ type: 'submit', cat: e.cat, at: e.at }, 'mengirim laporan')}>
         Kirim laporan baru
       </Button>
     );
@@ -127,10 +127,10 @@ export function DuplicateSheet() {
         </View>
       </View>
       {s.actionError ? <InlineError message={s.actionError} onRetry={s.clearActionError} /> : null}
-      <Button mode="contained" loading={s.busy} disabled={s.busy} onPress={() => s.need({ type: 'vote', id: r.id, vote: 'confirm', then: 'report' }, 'ikut memastikan laporan')}>
+      <Button hitSlop={HIT} mode="contained" loading={s.busy} disabled={s.busy} onPress={() => s.need({ type: 'vote', id: r.id, vote: 'confirm', then: 'report' }, 'ikut memastikan laporan')}>
         Ya, sama. Pastikan laporan ini
       </Button>
-      <Button mode="outlined" disabled={s.busy} onPress={() => s.need({ type: 'submit', cat: e.cat, at: e.at }, 'mengirim laporan')}>
+      <Button hitSlop={HIT} mode="outlined" disabled={s.busy} onPress={() => s.need({ type: 'submit', cat: e.cat, at: e.at }, 'mengirim laporan')}>
         Bukan, kirim laporan baru
       </Button>
     </>
@@ -167,10 +167,10 @@ export function SentSheet() {
           { value: '3', label: 'Berat', showSelectedCheck: true },
         ]}
       />
-      <Button mode="outlined" icon="camera-outline" onPress={() => s.showToast('Kirim foto belum tersedia di versi ini')}>
+      <Button hitSlop={HIT} mode="outlined" icon="camera-outline" onPress={() => s.showToast('Kirim foto belum tersedia di versi ini')}>
         Tambah foto
       </Button>
-      <Button
+      <Button hitSlop={HIT}
         mode="contained"
         onPress={() => {
           s.home();

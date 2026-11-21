@@ -8,7 +8,7 @@ import { RISK_LABEL } from '../domain/risk';
 import { useStore } from '../state/AppStore';
 import type { PlaceRef, SheetEntry } from '../state/types';
 import { RiskBadge } from '../components/RiskBadge';
-import { Muted, Placeholder, SheetHeader, styles, useAppTheme } from './common';
+import { Muted, Placeholder, SheetHeader, styles, useAppTheme, HIT } from './common';
 
 /** Place sheet (spec §7.5 + §12b.3): name, address, Rute / Pantau / Bagikan, and the way there. */
 export function PlaceSheet() {
@@ -46,13 +46,13 @@ export function PlaceSheet() {
         </Muted>
       ) : null}
       <View style={styles.buttonsRow}>
-        <Button mode="contained" icon="directions" onPress={() => s.go({ view: 'route', dest: p, origin: null })}>
+        <Button hitSlop={HIT} mode="contained" icon="directions" onPress={() => s.go({ view: 'route', dest: p, origin: null })}>
           Rute
         </Button>
-        <Button mode="outlined" icon="bell-outline" onPress={() => s.need({ type: 'watch', center: p, name: p.kind === 'pin' ? undefined : p.name }, 'memantau area')}>
+        <Button hitSlop={HIT} mode="outlined" icon="bell-outline" onPress={() => s.need({ type: 'watch', center: p, name: p.kind === 'pin' ? undefined : p.name }, 'memantau area')}>
           Pantau
         </Button>
-        <Button mode="outlined" icon="share-variant" onPress={() => s.share(shareText(p))}>
+        <Button hitSlop={HIT} mode="outlined" icon="share-variant" onPress={() => s.share(shareText(p))}>
           Bagikan
         </Button>
       </View>
@@ -74,7 +74,7 @@ export function PlaceSheet() {
           <Placeholder rows={1} />
         )}
       </View>
-      <Button mode="text" icon="map-marker-plus-outline" style={{ alignSelf: 'flex-start' }} onPress={() => s.go({ view: 'quick', at: p })}>
+      <Button hitSlop={HIT} mode="text" icon="map-marker-plus-outline" style={{ alignSelf: 'flex-start' }} onPress={() => s.go({ view: 'quick', at: p })}>
         Laporkan di sini
       </Button>
     </>

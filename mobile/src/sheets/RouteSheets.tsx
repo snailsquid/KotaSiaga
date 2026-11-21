@@ -9,7 +9,7 @@ import { RISK_LABEL, RISK_ORDER } from '../domain/risk';
 import { useStore } from '../state/AppStore';
 import type { PlaceRef, SheetEntry } from '../state/types';
 import { RiskBadge } from '../components/RiskBadge';
-import { InlineError, Muted, Placeholder, SheetHeader, useAppTheme } from './common';
+import { InlineError, Muted, Placeholder, SheetHeader, useAppTheme, HIT } from './common';
 
 function navUrl(origin: Point, dest: Point) {
   return `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lon}&destination=${dest.lat},${dest.lon}&travelmode=driving`;
@@ -78,7 +78,7 @@ export function RouteSheet() {
       {s.routes.error ? (
         <View style={{ gap: 8 }}>
           <InlineError message={s.routes.error} onRetry={() => s.loadRoutes(origin, e.dest)} />
-          <Button mode="outlined" icon="navigation-variant" onPress={() => openNavigation(origin, e.dest)}>
+          <Button hitSlop={HIT} mode="outlined" icon="navigation-variant" onPress={() => openNavigation(origin, e.dest)}>
             Buka di aplikasi navigasi
           </Button>
         </View>
@@ -98,7 +98,7 @@ export function RouteSheet() {
       ))}
 
       {rr ? (
-        <Button mode="contained" icon="navigation-variant" onPress={() => openNavigation(origin, e.dest)}>
+        <Button hitSlop={HIT} mode="contained" icon="navigation-variant" onPress={() => openNavigation(origin, e.dest)}>
           Mulai di aplikasi navigasi
         </Button>
       ) : null}
@@ -191,7 +191,7 @@ export function RouteDetailSheet() {
       <>
         <SheetHeader title="Rute" onClose={s.back} closeLabel="Kembali ke daftar rute" />
         <Muted>Rute aman belum tersedia</Muted>
-        <Button mode="outlined" icon="navigation-variant" onPress={() => openNavigation(origin, e.dest)}>
+        <Button hitSlop={HIT} mode="outlined" icon="navigation-variant" onPress={() => openNavigation(origin, e.dest)}>
           Buka di aplikasi navigasi
         </Button>
       </>
@@ -232,7 +232,7 @@ export function RouteDetailSheet() {
           ))
         )}
       </View>
-      <Button mode="contained" icon="navigation-variant" onPress={() => openNavigation(origin, e.dest)}>
+      <Button hitSlop={HIT} mode="contained" icon="navigation-variant" onPress={() => openNavigation(origin, e.dest)}>
         Buka di aplikasi navigasi
       </Button>
     </>
