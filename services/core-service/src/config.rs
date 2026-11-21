@@ -1,5 +1,6 @@
 //! Environment configuration. Mock switches follow AGENTS.md section 7.
 
+use std::collections::HashMap;
 use std::env;
 
 #[derive(Debug, Clone)]
@@ -7,6 +8,19 @@ pub struct Config {
     pub port: u16,
     pub database_path: String,
     pub mock: MockConfig,
+    /// `X-API-Key` value -> caller name (e.g. `tourism`). From `API_KEYS=name:key,name:key`.
+    pub api_keys: HashMap<String, String>,
+    /// Key for `/_mock/*` (and later admin actions). From `ADMIN_API_KEY`.
+    pub admin_api_key: Option<String>,
+}
+
+impl Config {
+    pub fn caller(&self, key: &str) -> Option<&str> {
+        if self.admin_api_key.as_deref() == Some(key) {
+            return Some("admin");
+        }
+        self.api_keys.get(key).map(String::as_str)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -45,9 +59,31 @@ impl Config {
             None => random_seed(),
         };
 
+        let mut api_keys = HashMap::new();
+        for pair in get("API_KEYS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            let (name, key) = pair
+                .split_once(':')
+                .ok_or("API_KEYS entries must be name:key")?;
+            if key.len() < 16 {
+                return Err(format!("API key for {name} must be at least 16 characters"));
+            }
+            api_keys.insert(key.to_string(), name.to_string());
+        }
+        let admin_api_key = get("ADMIN_API_KEY").filter(|k| !k.is_empty());
+        if admin_api_key.as_ref().is_some_and(|k| k.len() < 16) {
+            return Err("ADMIN_API_KEY must be at least 16 characters".into());
+        }
+
         Ok(Self {
             port,
             database_path,
+            api_keys,
+            admin_api_key,
             mock: MockConfig {
                 enabled: parse_bool(&get, "MOCK_MODE")?,
                 tick_seconds,
@@ -117,6 +153,24 @@ mod tests {
     fn rejects_tick_out_of_range() {
         assert!(cfg(&[("MOCK_TICK_SECONDS", "1")]).is_err());
         assert!(cfg(&[("MOCK_TICK_SECONDS", "61")]).is_err());
+    }
+
+    #[test]
+    fn parses_api_keys() {
+        let c = cfg(&[
+            (
+                "API_KEYS",
+                "tourism:aaaaaaaaaaaaaaaa, health:bbbbbbbbbbbbbbbb",
+            ),
+            ("ADMIN_API_KEY", "cccccccccccccccc"),
+        ])
+        .unwrap();
+        assert_eq!(c.caller("aaaaaaaaaaaaaaaa"), Some("tourism"));
+        assert_eq!(c.caller("bbbbbbbbbbbbbbbb"), Some("health"));
+        assert_eq!(c.caller("cccccccccccccccc"), Some("admin"));
+        assert_eq!(c.caller("nope"), None);
+        assert!(cfg(&[("API_KEYS", "short:abc")]).is_err());
+        assert!(cfg(&[("API_KEYS", "nokey")]).is_err());
     }
 
     #[test]

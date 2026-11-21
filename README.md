@@ -17,21 +17,44 @@ Rust (Tokio + Axum), SQLite in WAL mode, Nginx gateway, Cloudflare tunnel, Docke
 
 ## Endpoints
 
-Base: `https://<name>.stei.site/api` (name pending in the API Registry). Status: **PROPOSED**,
-only `/health` is implemented so far.
+Base: `https://<name>.stei.site/api` (name pending in the API Registry). Contract: **PROPOSED**, see
+`openapi.yaml`. Group keys go in the `X-API-Key` header.
 
 | Method and path | Auth | Implemented |
 |---|---|---|
 | `GET /health` | none | yes |
-| `GET /status`, `/risk`, `/weather`, `/disasters`, `/reports`, `/changes` | `X-API-Key` or JWT | no |
-| `POST /routes/safe` | `X-API-Key` or JWT | no |
+| `GET /status?lat&lon&radius_m` | key | yes |
+| `GET /risk?lat&lon` or `?bbox=` | key | yes |
+| `GET /weather?lat&lon` | key | yes (mock data; Open-Meteo adapter pending) |
+| `GET /disasters?bbox&limit&offset` | key | yes (mock data; PetaBencana adapter pending) |
+| `GET /reports?category&status&bbox&since&limit&offset` | key | yes |
+| `GET /changes?since&limit` | key | yes |
+| `POST /_mock/scenario`, `GET /_mock/state` | admin key, `MOCK_MODE=true` only | yes |
+| `POST /routes/safe` | key | no |
 | `POST /auth/register`, `/auth/login` | none | no |
 | `POST /reports`, `/reports/{id}/votes`, `/subscriptions`; `GET /subscriptions`, `/alerts` | JWT | no |
 
 ```sh
-curl https://<name>.stei.site/api/health
-# {"status":"ok"}
+BASE=https://<name>.stei.site/api KEY=<your group key>
+curl "$BASE/health"
+curl -H "X-API-Key: $KEY" "$BASE/status?lat=-6.89&lon=107.61&radius_m=1000"
+curl -H "X-API-Key: $KEY" "$BASE/risk?lat=-6.89&lon=107.61"
+curl -H "X-API-Key: $KEY" "$BASE/changes?since=0&limit=50"   # then poll with since=<meta.seq>
 ```
+
+### Mock mode (demo)
+
+`MOCK_MODE=true` randomizes the inputs only (weather, reports, votes, disaster signals, upstream
+faults). Verification, risk scoring and the change feed run the real code, so `meta.seq` advances
+every tick and risk levels change by themselves. Set `MOCK_SEED` to replay the same story.
+
+```sh
+curl -X POST -H "X-API-Key: $ADMIN_KEY" -H 'content-type: application/json' \
+  -d '{"name":"flood_verified","lat":-6.885,"lon":107.613}' "$BASE/_mock/scenario"
+```
+
+Scenarios: `rain_storm`, `flood_verified`, `road_closure`, `event_crowd`, `disaster_signal`,
+`upstream_down`, `recover`, `reset`.
 
 ## Develop
 
@@ -39,7 +62,10 @@ curl https://<name>.stei.site/api/health
 cargo test                     # all services
 cargo clippy --all-targets -- -D warnings
 npx -y @redocly/cli@1.34.5 lint openapi.yaml
-DATABASE_PATH=./core.db PORT=8080 cargo run -p core-service
+MOCK_MODE=true API_KEYS=dev:devkey-0000000000 ADMIN_API_KEY=admin-0000000000 \
+  DATABASE_PATH=./core.db PORT=8080 cargo run -p core-service
+# Check live responses against the contract (needs: pip install jsonschema pyyaml)
+python3 scripts/validate_responses.py openapi.yaml http://127.0.0.1:8080/api devkey-0000000000 admin-0000000000
 ```
 
 ## Deploy (Volta host or STB)
