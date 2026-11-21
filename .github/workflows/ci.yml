@@ -4,6 +4,7 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -22,7 +23,7 @@ jobs:
   # Each arch builds natively on its own runner (no QEMU; emulated Rust builds are very slow),
   # then `merge` joins the two digests under one tag. Docker pulls the right one per machine.
   image:
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     needs: test
     runs-on: ${{ matrix.runner }}
     permissions: { contents: read, packages: write }
@@ -85,7 +86,8 @@ jobs:
       - run: |
           short="${{ matrix.service }}"; short="${short%-service}"
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kotasiaga-${short}"
+          sources=()
+          for f in /tmp/digests/*; do sources+=("$image@$(cat "$f")"); done
           docker buildx imagetools create \
-            -t "$image:latest" -t "$image:${GITHUB_SHA}" \
-            $(for f in /tmp/digests/*; do echo "$image@$(cat "$f")"; done)
+            -t "$image:latest" -t "$image:${GITHUB_SHA}" "${sources[@]}"
           docker buildx imagetools inspect "$image:latest"
