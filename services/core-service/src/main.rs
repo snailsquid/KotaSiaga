@@ -34,15 +34,11 @@ pub struct AppState {
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_writer(std::io::stderr)
         .init();
 
-    let config = match config::Config::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("invalid configuration: {e}");
-            std::process::exit(2);
-        }
-    };
+    let config = config::Config::from_env()
+        .unwrap_or_else(|e| fatal(2, &format!("invalid configuration: {e}")));
     if config.mock.enabled {
         tracing::info!(
             seed = config.mock.seed,
@@ -53,8 +49,13 @@ async fn main() {
     }
 
     let db = db::open(&config.database_path).await.unwrap_or_else(|e| {
-        tracing::error!("cannot open database {}: {e}", config.database_path);
-        std::process::exit(1);
+        fatal(
+            1,
+            &format!(
+                "cannot open database {}: {e} (does its directory exist and is it writable by this user?)",
+                config.database_path
+            ),
+        )
     });
 
     if config.api_keys.is_empty() && config.admin_api_key.is_none() {
@@ -76,12 +77,23 @@ async fn main() {
     };
     let app = http::router(state);
 
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .unwrap_or_else(|e| fatal(1, &format!("cannot bind {addr}: {e}")));
     tracing::info!(%addr, "core-service listening");
-    axum::serve(listener, app)
+    if let Err(e) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .expect("server");
+    {
+        fatal(1, &format!("server error: {e}"));
+    }
+}
+
+/// Logs a startup failure straight to stderr (not through tracing, so RUST_LOG cannot hide it)
+/// and exits. The runtime image is distroless with no shell, so this line is the only clue.
+fn fatal(code: i32, msg: &str) -> ! {
+    eprintln!("core-service: fatal: {msg}");
+    std::process::exit(code);
 }
 
 /// Drives time-based rules (expiry, decay) and, in mock mode, the generator.
