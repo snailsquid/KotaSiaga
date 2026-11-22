@@ -13,6 +13,7 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
+    tune_malloc();
     if std::env::args().nth(1).as_deref() == Some("backup") {
         backup().await;
         return;
@@ -120,4 +121,16 @@ async fn backup() {
 fn fatal_backup(msg: &str) -> ! {
     eprintln!("identity-service: backup failed: {msg}");
     std::process::exit(1);
+}
+
+/// glibc keeps freed large buffers (Argon2 uses 8 MiB per hash) in per-thread arenas, which can
+/// add up past the container's memory limit. A fixed mmap threshold returns them to the OS on
+/// free, and two arenas cap the per-thread growth. No-op outside glibc (e.g. macOS dev builds).
+fn tune_malloc() {
+    #[cfg(target_env = "gnu")]
+    // SAFETY: mallopt only changes allocator tunables; called once before other threads start.
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 1 << 20);
+        libc::mallopt(libc::M_ARENA_MAX, 2);
+    }
 }
