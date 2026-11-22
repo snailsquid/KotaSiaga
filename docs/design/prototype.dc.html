@@ -1,0 +1,965 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>KotaSiaga prototipe</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0..1,0&amp;display=block">
+<style>
+body{margin:0}
+a{color:#0061A4}a:hover{color:#004A7F}
+.ms{font-family:'Material Symbols Outlined';font-weight:normal;font-style:normal;font-size:24px;line-height:1;letter-spacing:normal;text-transform:none;display:inline-block;white-space:nowrap;direction:ltr;font-feature-settings:'liga';-webkit-font-smoothing:antialiased;font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24}
+.ms.fill{font-variation-settings:'FILL' 1,'wght' 400,'GRAD' 0,'opsz' 24}
+.ks-noscroll::-webkit-scrollbar{display:none}
+button:focus-visible{outline:2px solid #0061A4;outline-offset:2px}
+input::placeholder{color:#43474E}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #EEF0EB; font-family: Roboto, system-ui, sans-serif; color: #191C20; font-size: 14px; line-height: 20px; letter-spacing: 0.25px">
+
+  <!-- MAP -->
+  <svg width="390" height="844" viewBox="0 0 390 844" aria-hidden="true" style="position: absolute; left: 0; top: 0">
+    <rect x="0" y="0" width="390" height="844" style="fill: #EEF0EB"></rect>
+    <path d="M214 120 L330 112 L336 196 L222 206 Z" style="fill: #D4E6CF"></path>
+    <path d="M20 610 L120 600 L128 700 L26 712 Z" style="fill: #D4E6CF"></path>
+    <path d="M180 0 C200 160 168 300 214 460 C240 560 226 700 262 844" style="fill: none; stroke: #BBD5E8; stroke-width: 9"></path>
+    <g style="fill: none; stroke: #FFFFFF; stroke-width: 5">
+      <path d="M0 250 C120 244 260 236 390 226"></path>
+      <path d="M0 470 C140 462 250 458 390 446"></path>
+      <path d="M0 660 C110 652 280 640 390 630"></path>
+      <path d="M40 0 L52 844"></path>
+      <path d="M350 0 L344 844"></path>
+      <path d="M120 300 L246 296"></path>
+      <path d="M200 520 L330 512"></path>
+    </g>
+    <g style="fill: none; stroke: #DADDD6; stroke-width: 15">
+      <path d="M0 372 C120 360 220 352 390 330"></path>
+      <path d="M300 0 C296 250 292 500 288 844"></path>
+      <path d="M150 0 C160 200 200 500 240 844"></path>
+      <path d="M80 0 C90 300 100 600 110 844"></path>
+      <path d="M0 560 C150 548 260 545 390 520"></path>
+    </g>
+    <g style="fill: none; stroke: #FFFFFF; stroke-width: 11">
+      <path d="M0 372 C120 360 220 352 390 330"></path>
+      <path d="M300 0 C296 250 292 500 288 844"></path>
+      <path d="M150 0 C160 200 200 500 240 844"></path>
+      <path d="M80 0 C90 300 100 600 110 844"></path>
+      <path d="M0 560 C150 548 260 545 390 520"></path>
+    </g>
+    <g style="fill: #5F6368; font-size: 10px; font-family: Roboto, sans-serif">
+      <text x="10" y="392">Jl. Pasteur</text>
+      <text x="306" y="300" transform="rotate(88 306 300)">Jl. Ir. H. Juanda</text>
+      <text x="196" y="610" transform="rotate(76 196 610)">Jl. Tamansari</text>
+      <text x="92" y="200" transform="rotate(86 92 200)">Jl. Cihampelas</text>
+      <text x="300" y="540">Jl. Merdeka</text>
+      <text x="236" y="160">Babakan Siliwangi</text>
+    </g>
+  </svg>
+
+  <!-- RISK: soft zones that follow the affected area + colored road stretches (like a traffic layer) -->
+  <sc-if value="{{showRisk}}" hint-placeholder-val="{{true}}">
+    <svg width="390" height="844" viewBox="0 0 390 844" aria-hidden="true" style="position: absolute; left: 0; top: 0">
+      <defs>
+        <filter id="ks-soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="9"></feGaussianBlur></filter>
+      </defs>
+      <sc-for list="{{zones}}" as="z" hint-placeholder-count="2">
+        <path d="{{z.d}}" style="{{z.style}}"></path>
+      </sc-for>
+      <sc-for list="{{segments}}" as="sg" hint-placeholder-count="2">
+        <path d="{{sg.d}}" style="{{sg.style}}"></path>
+      </sc-for>
+    </svg>
+    <sc-for list="{{zoneLabels}}" as="zl" hint-placeholder-count="2">
+      <span style="{{zl.style}}"><span class="ms fill" aria-hidden="true" style="font-size: 14px">{{zl.icon}}</span>{{zl.text}}</span>
+    </sc-for>
+  </sc-if>
+
+  <!-- route lines -->
+  <sc-if value="{{isRoute}}" hint-placeholder-val="{{false}}">
+    <svg width="390" height="844" viewBox="0 0 390 844" aria-hidden="true" style="position: absolute; left: 0; top: 0">
+      <path d="{{place.lineB}}" style="{{lineB}}"></path>
+      <path d="{{place.lineA}}" style="{{lineA}}"></path>
+    </svg>
+  </sc-if>
+
+  <!-- report pins -->
+  <sc-if value="{{showPins}}" hint-placeholder-val="{{true}}">
+    <sc-for list="{{pins}}" as="r" hint-placeholder-count="5">
+      <button aria-label="{{r.aria}}" onClick="{{r.open}}" style="{{r.pinStyle}}">
+        <span class="ms" aria-hidden="true" style="font-size: 20px">{{r.icon}}</span>
+      </button>
+    </sc-for>
+  </sc-if>
+
+  <!-- destination marker -->
+  <sc-if value="{{showDest}}" hint-placeholder-val="{{false}}">
+    <div style="{{destStyle}}">
+      <span class="ms fill" aria-hidden="true" style="font-size: 40px; color: #BA1A1A">location_on</span>
+      <span style="font-size: 12px; line-height: 16px; font-weight: 500; background: #FFFFFF; padding: 2px 6px; border-radius: 4px; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,.3)">{{place.short}}</span>
+    </div>
+  </sc-if>
+
+  <!-- me -->
+  <div aria-hidden="true" style="position: absolute; left: 172px; top: 416px; width: 48px; height: 48px; border-radius: 24px; background: rgba(66,133,244,.18); display: flex; align-items: center; justify-content: center">
+    <div style="width: 18px; height: 18px; border-radius: 9px; background: #4285F4; border: 3px solid #FFFFFF; box-shadow: 0 1px 3px rgba(0,0,0,.3)"></div>
+  </div>
+
+  <!-- scrim for the modal filter sheet -->
+  <sc-if value="{{showScrim}}" hint-placeholder-val="{{false}}">
+    <button aria-label="Tutup filter" onClick="{{back}}" style="position: absolute; inset: 0; border: 0; padding: 0; background: rgba(0,0,0,.32); cursor: pointer"></button>
+  </sc-if>
+
+  <!-- MD3 SEARCH BAR -->
+  <div style="position: absolute; top: 44px; left: 16px; right: 16px; height: 56px; background: #E6E8EE; border-radius: 28px; box-shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 8px 3px rgba(0,0,0,.15); display: flex; align-items: center; gap: 4px; padding: 0 4px; box-sizing: border-box">
+    <sc-if value="{{isHome}}" hint-placeholder-val="{{true}}">
+      <button aria-label="Menu" onClick="{{noop}}" style="width: 48px; height: 48px; border: 0; background: transparent; border-radius: 24px; color: #43474E; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0"><span class="ms" aria-hidden="true">menu</span></button>
+    </sc-if>
+    <sc-if value="{{notHome}}" hint-placeholder-val="{{false}}">
+      <button aria-label="Kembali" onClick="{{back}}" style="width: 48px; height: 48px; border: 0; background: transparent; border-radius: 24px; color: #43474E; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0"><span class="ms" aria-hidden="true">arrow_back</span></button>
+    </sc-if>
+    <label for="ks-search" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Cari tempat atau laporan</label>
+    <input id="ks-search" type="search" placeholder="{{searchPlaceholder}}" onFocus="{{openSearch}}" style="flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font: inherit; font-size: 16px; line-height: 24px; letter-spacing: 0.5px; color: #191C20">
+    <button aria-label="{{avatarLabel}}" onClick="{{avatarTap}}" style="width: 48px; height: 48px; border: 0; background: transparent; border-radius: 24px; color: #43474E; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; position: relative">
+      <sc-if value="{{signedIn}}" hint-placeholder-val="{{false}}">
+        <span style="width: 30px; height: 30px; border-radius: 15px; background: #0061A4; color: #FFFFFF; font-weight: 500; font-size: 14px; display: flex; align-items: center; justify-content: center">W</span>
+        <span style="position: absolute; top: 6px; right: 6px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: #BA1A1A; color: #FFFFFF; font-size: 11px; line-height: 16px; font-weight: 500; text-align: center">2</span>
+      </sc-if>
+      <sc-if value="{{signedOut}}" hint-placeholder-val="{{true}}">
+        <span class="ms" aria-hidden="true" style="font-size: 30px">account_circle</span>
+      </sc-if>
+    </button>
+  </div>
+
+  <!-- MD3 FILTER CHIPS (elevated, on the map) -->
+  <sc-if value="{{showChips}}" hint-placeholder-val="{{true}}">
+    <div class="ks-noscroll" role="toolbar" aria-label="Filter laporan" style="position: absolute; top: 112px; left: 0; right: 0; display: flex; gap: 8px; overflow-x: auto; padding: 2px 16px 4px; box-sizing: border-box">
+      <button onClick="{{openFilter}}" aria-label="{{filterAria}}" style="{{filterChipStyle}}">
+        <span class="ms" aria-hidden="true" style="font-size: 18px">tune</span>
+        <span>Filter</span>
+        <sc-if value="{{hasFilterCount}}" hint-placeholder-val="{{false}}">
+          <span style="min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: #0061A4; color: #FFFFFF; font-size: 11px; line-height: 18px; text-align: center">{{filterCount}}</span>
+        </sc-if>
+      </button>
+      <sc-for list="{{chips}}" as="ch" hint-placeholder-count="5">
+        <button aria-pressed="{{ch.pressed}}" onClick="{{ch.toggle}}" style="{{ch.style}}">
+          <sc-if value="{{ch.on}}" hint-placeholder-val="{{false}}">
+            <span class="ms" aria-hidden="true" style="font-size: 18px">check</span>
+          </sc-if>
+          <span>{{ch.label}}</span>
+        </button>
+      </sc-for>
+    </div>
+    <div style="position: absolute; top: 158px; left: 16px; right: 16px; display: flex; gap: 6px; align-items: center">
+      <sc-if value="{{isFiltered}}" hint-placeholder-val="{{false}}">
+        <span style="font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0.5px; padding: 4px 4px 4px 10px; border-radius: 8px; background: #ECEEF4; color: #191C20; box-shadow: 0 1px 2px rgba(0,0,0,.3); display: flex; align-items: center; gap: 4px">
+          Menampilkan {{shownCount}} dari {{totalCount}} laporan
+          <button onClick="{{clearFilters}}" style="height: 24px; padding: 0 8px; border: 0; border-radius: 12px; background: transparent; color: #0061A4; font: inherit; font-weight: 500; cursor: pointer">Hapus</button>
+        </span>
+      </sc-if>
+      <sc-if value="{{notFiltered}}" hint-placeholder-val="{{true}}">
+        <span style="{{stripStyle}}">{{stripText}}</span>
+        <sc-if value="{{showMock}}" hint-placeholder-val="{{true}}">
+          <span style="font-size: 11px; line-height: 16px; font-weight: 500; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 8px; background: #2E3135; color: #EFF0F7">MOCK</span>
+        </sc-if>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <!-- MAP FABs + EXTENDED FAB -->
+  <sc-if value="{{showControls}}" hint-placeholder-val="{{true}}">
+    <div style="{{ctrlStyle}}">
+      <button aria-label="Lapisan peta" onClick="{{toggleLayers}}" style="width: 40px; height: 40px; border-radius: 12px; border: 0; background: #E6E8EE; color: #43474E; box-shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 8px 3px rgba(0,0,0,.15); display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; margin-right: 8px"><span class="ms" aria-hidden="true">layers</span></button>
+      <button aria-label="Lokasi saya" onClick="{{locate}}" style="width: 56px; height: 56px; border-radius: 16px; border: 0; background: #E6E8EE; color: #0061A4; box-shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 8px 3px rgba(0,0,0,.15); display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0"><span class="ms" aria-hidden="true">my_location</span></button>
+      <sc-if value="{{showLapor}}" hint-placeholder-val="{{true}}">
+        <button onClick="{{lapor}}" style="height: 56px; padding: 0 20px 0 16px; border-radius: 16px; border: 0; background: #D1E4FF; color: #001D36; box-shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 8px 3px rgba(0,0,0,.15); font: inherit; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; gap: 12px; cursor: pointer">
+          <span class="ms" aria-hidden="true">add_location_alt</span>Lapor
+        </button>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <!-- LAYERS MENU -->
+  <sc-if value="{{layersOpen}}" hint-placeholder-val="{{false}}">
+    <div style="{{layersStyle}}">
+      <label style="display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 12px; cursor: pointer; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px">
+        <input type="checkbox" checked="{{showRisk}}" onChange="{{toggleRisk}}" style="width: 18px; height: 18px; accent-color: #0061A4">
+        Area risiko
+      </label>
+      <label style="display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 12px; cursor: pointer; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px">
+        <input type="checkbox" checked="{{showPins}}" onChange="{{togglePins}}" style="width: 18px; height: 18px; accent-color: #0061A4">
+        Laporan warga
+      </label>
+      <div style="height: 1px; background: #C3C7CF; margin: 8px 0"></div>
+      <div style="display: flex; flex-direction: column; gap: 8px; padding: 4px 12px 8px; font-size: 12px; line-height: 16px; color: #43474E">
+        <div style="display: flex; align-items: center; gap: 10px"><span style="width: 18px; height: 18px; border-radius: 9px; background: #2E3135; border: 2px solid #FFFFFF; box-shadow: 0 0 0 1px #2E3135"></span>Sudah dipastikan warga</div>
+        <div style="display: flex; align-items: center; gap: 10px"><span style="width: 18px; height: 18px; border-radius: 9px; background: #FFFFFF; border: 2px dashed #43474E; box-sizing: border-box"></span>Perlu dipastikan</div>
+        <div style="display: flex; align-items: center; gap: 10px"><span style="width: 22px; height: 5px; border-radius: 3px; background: #F29900"></span>Waspada (jalan atau area)</div>
+        <div style="display: flex; align-items: center; gap: 10px"><span style="width: 22px; height: 5px; border-radius: 3px; background: #BA1A1A"></span>Bahaya (jalan atau area)</div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- SNACKBAR -->
+  <sc-if value="{{hasToast}}" hint-placeholder-val="{{false}}">
+    <div role="status" style="{{toastStyle}}">{{toast}}</div>
+  </sc-if>
+
+  <!-- MD3 BOTTOM SHEET -->
+  <div style="{{sheetStyle}}">
+    <button aria-label="{{handleLabel}}" onClick="{{toggleHalf}}" style="flex: none; height: 36px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0">
+      <span style="width: 32px; height: 4px; border-radius: 2px; background: rgba(67,71,78,.4)"></span>
+    </button>
+    <div class="ks-noscroll" style="flex: 1; overflow-y: auto; padding: 0 16px 24px; display: flex; flex-direction: column; gap: 16px">
+
+      <!-- HOME -->
+      <sc-if value="{{isHome}}" hint-placeholder-val="{{true}}">
+        <sc-if value="{{showVerifyCard}}" hint-placeholder-val="{{true}}">
+          <div style="background: #ECEEF4; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0.5px; color: #43474E; display: flex; align-items: center; gap: 4px"><span class="ms" aria-hidden="true" style="font-size: 16px">help</span>Bantu pastikan · {{vt.dist}} dari kamu</span>
+              <span style="font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: 0.15px">{{vt.q}}</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center">
+              <button onClick="{{vt.voteYes}}" style="flex: 1 1 0; min-width: 0; height: 40px; padding: 0 12px; border-radius: 20px; border: 0; background: #0061A4; color: #FFFFFF; font: inherit; font-weight: 500; letter-spacing: 0.1px; white-space: nowrap; cursor: pointer">{{vt.yesL}}</button>
+              <button onClick="{{vt.voteNo}}" style="flex: 1 1 0; min-width: 0; height: 40px; padding: 0 12px; border-radius: 20px; border: 1px solid #73777F; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; white-space: nowrap; cursor: pointer">{{vt.noL}}</button>
+            </div>
+            <button onClick="{{vt.skip}}" style="align-self: center; height: 40px; padding: 0 12px; border-radius: 20px; border: 0; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; white-space: nowrap; cursor: pointer; margin-top: -4px">Tidak tahu</button>
+          </div>
+        </sc-if>
+        <button onClick="{{toggleHalf}}" style="display: flex; justify-content: space-between; align-items: center; gap: 12px; border: 0; background: transparent; padding: 0; text-align: left; font: inherit; color: inherit; cursor: pointer">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <span style="font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0.5px; color: #43474E">Di sekitarmu · Coblong</span>
+            <div style="display: flex; align-items: center; gap: 8px">
+              <span style="{{risk.pill}}">{{risk.label}}</span>
+              <span style="font-size: 22px; line-height: 28px">{{risk.headline}}</span>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; flex: none">
+            <span style="display: flex; align-items: center; gap: 4px; font-size: 22px; line-height: 28px"><span class="ms" aria-hidden="true" style="color: #43474E">{{risk.icon}}</span>{{risk.temp}}</span>
+            <span style="font-size: 12px; line-height: 16px; color: #43474E">{{risk.cond}}</span>
+          </div>
+        </button>
+        <sc-if value="{{half}}" hint-placeholder-val="{{false}}">
+          <p style="margin: 0; font-size: 14px; line-height: 20px; color: #43474E">{{risk.why}}</p>
+          <div style="background: #FFFFFF; border: 1px solid #C3C7CF; border-radius: 12px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px">
+            <span style="font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px">Hujan 6 jam ke depan (mm/jam)</span>
+            <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; align-items: end">
+              <sc-for list="{{forecast}}" as="f" hint-placeholder-count="6">
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+                  <span style="font-size: 11px; line-height: 16px; color: #43474E">{{f.mm}}</span>
+                  <div style="height: 40px; width: 100%; display: flex; align-items: flex-end"><div style="{{f.bar}}"></div></div>
+                  <span style="font-size: 12px; line-height: 16px; color: #43474E">{{f.t}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column">
+            <span style="font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; padding: 0 0 4px">Laporan terdekat</span>
+            <sc-for list="{{nearby}}" as="n" hint-placeholder-count="3">
+              <button onClick="{{n.open}}" style="display: flex; align-items: center; gap: 16px; min-height: 72px; border: 0; background: transparent; padding: 8px 0; text-align: left; font: inherit; color: inherit; cursor: pointer">
+                <span class="ms" aria-hidden="true" style="color: #43474E; flex: none">{{n.icon}}</span>
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+                  <span style="font-size: 16px; line-height: 24px; letter-spacing: 0.5px">{{n.title}}</span>
+                  <span style="font-size: 14px; line-height: 20px; color: #43474E">{{n.place}} · {{n.dist}} · {{n.statusShort}}</span>
+                </span>
+              </button>
+            </sc-for>
+          </div>
+          <button onClick="{{watch}}" style="align-self: flex-start; height: 40px; padding: 0 24px 0 16px; border-radius: 20px; border: 1px solid #73777F; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; gap: 8px; cursor: pointer"><span class="ms" aria-hidden="true" style="font-size: 18px">notifications</span>Pantau area ini</button>
+        </sc-if>
+      </sc-if>
+
+      <!-- SEARCH -->
+      <sc-if value="{{isSearch}}" hint-placeholder-val="{{false}}">
+        <div style="display: flex; flex-direction: column">
+          <span style="font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; color: #43474E; padding: 0 0 4px">Terakhir dicari</span>
+          <sc-for list="{{places}}" as="pl" hint-placeholder-count="4">
+            <button onClick="{{pl.pick}}" style="display: flex; align-items: center; gap: 16px; min-height: 64px; border: 0; background: transparent; padding: 8px 0; text-align: left; font: inherit; color: inherit; cursor: pointer">
+              <span class="ms" aria-hidden="true" style="color: #43474E; flex: none">{{pl.icon}}</span>
+              <span style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+                <span style="font-size: 16px; line-height: 24px; letter-spacing: 0.5px">{{pl.name}}</span>
+                <span style="font-size: 14px; line-height: 20px; color: #43474E">{{pl.addr}}</span>
+              </span>
+              <span style="font-size: 12px; line-height: 16px; color: #43474E; flex: none">{{pl.dist}}</span>
+            </button>
+          </sc-for>
+        </div>
+        <div style="display: flex; flex-direction: column">
+          <span style="font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; color: #43474E; padding: 0 0 4px">Laporan</span>
+          <sc-for list="{{searchReports}}" as="n" hint-placeholder-count="2">
+            <button onClick="{{n.open}}" style="display: flex; align-items: center; gap: 16px; min-height: 64px; border: 0; background: transparent; padding: 8px 0; text-align: left; font: inherit; color: inherit; cursor: pointer">
+              <span class="ms" aria-hidden="true" style="color: #43474E; flex: none">{{n.icon}}</span>
+              <span style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+                <span style="font-size: 16px; line-height: 24px; letter-spacing: 0.5px">{{n.title}}</span>
+                <span style="font-size: 14px; line-height: 20px; color: #43474E">{{n.place}} · {{n.statusShort}}</span>
+              </span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- PLACE -->
+      <sc-if value="{{isPlace}}" hint-placeholder-val="{{false}}">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 400">{{place.name}}</h2>
+            <span style="font-size: 14px; line-height: 20px; color: #43474E">{{place.addr}} · {{place.dist}}</span>
+          </div>
+          <button aria-label="Tutup" onClick="{{goHome}}" style="width: 40px; height: 40px; flex: none; border: 0; background: #E1E2E8; border-radius: 20px; color: #43474E; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0"><span class="ms" aria-hidden="true">close</span></button>
+        </div>
+        <div style="display: flex; gap: 8px">
+          <button onClick="{{openRoute}}" style="height: 40px; padding: 0 24px 0 16px; border-radius: 20px; border: 0; background: #0061A4; color: #FFFFFF; font: inherit; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; gap: 8px; cursor: pointer"><span class="ms" aria-hidden="true" style="font-size: 18px">directions</span>Rute</button>
+          <button onClick="{{watch}}" style="height: 40px; padding: 0 24px 0 16px; border-radius: 20px; border: 1px solid #73777F; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; gap: 8px; cursor: pointer"><span class="ms" aria-hidden="true" style="font-size: 18px">notifications</span>Pantau</button>
+          <button onClick="{{share}}" style="height: 40px; padding: 0 24px 0 16px; border-radius: 20px; border: 1px solid #73777F; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; gap: 8px; cursor: pointer"><span class="ms" aria-hidden="true" style="font-size: 18px">share</span>Bagikan</button>
+        </div>
+        <div style="background: #ECEEF4; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; align-items: center; gap: 8px">
+            <span style="{{place.riskPill}}">{{place.riskLabel}}</span>
+            <span style="font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: 0.15px">Kondisi menuju ke sana</span>
+          </div>
+          <span style="font-size: 14px; line-height: 20px; color: #43474E">{{place.note}}</span>
+        </div>
+      </sc-if>
+
+      <!-- FILTER SHEET -->
+      <sc-if value="{{isFilter}}" hint-placeholder-val="{{false}}">
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 400">Filter laporan</h2>
+          <button onClick="{{resetDraft}}" style="height: 40px; padding: 0 12px; border-radius: 20px; border: 0; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; cursor: pointer">Atur ulang</button>
+        </div>
+        <fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column">
+          <legend style="font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; color: #43474E; padding: 0 0 4px">Jenis kejadian</legend>
+          <sc-for list="{{draftCats}}" as="dc" hint-placeholder-count="5">
+            <label style="display: flex; align-items: center; gap: 16px; height: 56px; cursor: pointer">
+              <span class="ms" aria-hidden="true" style="color: #43474E">{{dc.icon}}</span>
+              <span style="flex: 1; font-size: 16px; line-height: 24px; letter-spacing: 0.5px">{{dc.label}}</span>
+              <span style="font-size: 14px; color: #43474E">{{dc.count}}</span>
+              <input type="checkbox" checked="{{dc.on}}" onChange="{{dc.toggle}}" style="width: 18px; height: 18px; margin: 0 3px; accent-color: #0061A4">
+            </label>
+          </sc-for>
+        </fieldset>
+        <div style="height: 1px; background: #C3C7CF"></div>
+        <fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column">
+          <legend style="font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; color: #43474E; padding: 0 0 4px">Status</legend>
+          <sc-for list="{{draftStatus}}" as="ds" hint-placeholder-count="3">
+            <label style="display: flex; align-items: center; gap: 16px; height: 56px; cursor: pointer">
+              <span style="flex: 1; font-size: 16px; line-height: 24px; letter-spacing: 0.5px">{{ds.label}}</span>
+              <input type="radio" name="ks-status" checked="{{ds.on}}" onChange="{{ds.pick}}" style="width: 20px; height: 20px; margin: 0 2px; accent-color: #0061A4">
+            </label>
+          </sc-for>
+        </fieldset>
+        <button onClick="{{applyFilter}}" disabled="{{applyDisabled}}" style="{{applyStyle}}">{{applyLabel}}</button>
+      </sc-if>
+
+      <!-- REPORT DETAIL -->
+      <sc-if value="{{isReport}}" hint-placeholder-val="{{false}}">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 400">{{rep.title}}</h2>
+            <span style="font-size: 14px; line-height: 20px; color: #43474E">{{rep.label}} · {{rep.place}} · {{rep.dist}}</span>
+          </div>
+          <button aria-label="Tutup" onClick="{{goHome}}" style="width: 40px; height: 40px; flex: none; border: 0; background: #E1E2E8; border-radius: 20px; color: #43474E; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0"><span class="ms" aria-hidden="true">close</span></button>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap">
+          <span style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #C3C7CF; font-size: 14px; line-height: 30px; font-weight: 500; letter-spacing: 0.1px; color: #43474E; box-sizing: border-box">Keparahan: {{rep.sev}}</span>
+          <span style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #C3C7CF; font-size: 14px; line-height: 30px; font-weight: 500; letter-spacing: 0.1px; color: #43474E; box-sizing: border-box">Dilaporkan {{rep.ago}}</span>
+        </div>
+        <span style="font-size: 14px; line-height: 20px; color: #43474E">Oleh {{rep.by}} · otomatis hilang {{rep.expires}}</span>
+        <div style="background: #ECEEF4; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+          <sc-if value="{{rep.isWaiting}}" hint-placeholder-val="{{true}}">
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <span style="font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: 0.15px">Dipastikan {{rep.conf}} dari 3 warga</span>
+              <div role="progressbar" aria-label="Kemajuan konfirmasi" style="height: 4px; background: #D7E3F7; border-radius: 2px; overflow: hidden"><div style="{{rep.progStyle}}"></div></div>
+              <span style="font-size: 14px; line-height: 20px; color: #43474E">Laporan ini tampil sebagai belum pasti sampai 3 warga di sekitar lokasi membenarkannya.</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{rep.isVerified}}" hint-placeholder-val="{{false}}">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; line-height: 20px">
+              <span class="ms fill" aria-hidden="true" style="color: #0061A4; font-size: 20px">verified</span>
+              <span><b style="font-weight: 500">Dipastikan {{rep.conf}} warga</b> · terakhir 9 menit lalu</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{rep.canVote}}" hint-placeholder-val="{{true}}">
+            <span style="font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: 0.15px">{{rep.q}}</span>
+            <div style="display: flex; gap: 8px">
+              <button onClick="{{rep.voteYes}}" style="flex: 1 1 0; min-width: 0; height: 40px; padding: 0 12px; border-radius: 20px; border: 0; background: #0061A4; color: #FFFFFF; font: inherit; font-weight: 500; letter-spacing: 0.1px; white-space: nowrap; cursor: pointer">{{rep.yesL}}</button>
+              <button onClick="{{rep.voteNo}}" style="flex: 1 1 0; min-width: 0; height: 40px; padding: 0 12px; border-radius: 20px; border: 1px solid #73777F; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; white-space: nowrap; cursor: pointer">{{rep.noL}}</button>
+            </div>
+          </sc-if>
+          <sc-if value="{{rep.far}}" hint-placeholder-val="{{false}}">
+            <span style="font-size: 14px; line-height: 20px; color: #43474E">Hanya warga dalam 500 m dari lokasi yang bisa ikut memastikan. Kamu {{rep.dist}} dari sini.</span>
+          </sc-if>
+          <sc-if value="{{rep.voted}}" hint-placeholder-val="{{false}}">
+            <span style="font-size: 14px; line-height: 20px"><b style="font-weight: 500">{{rep.votedText}}</b> · Terima kasih, jawabanmu membantu warga lain.</span>
+          </sc-if>
+          <sc-if value="{{rep.mine}}" hint-placeholder-val="{{false}}">
+            <span style="font-size: 14px; line-height: 20px; color: #43474E">Ini laporanmu. Warga di sekitar sedang diminta memastikan, kami kabari kalau sudah dipastikan.</span>
+          </sc-if>
+        </div>
+        <button onClick="{{share}}" style="align-self: flex-start; height: 40px; padding: 0 24px 0 16px; border-radius: 20px; border: 1px solid #73777F; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; gap: 8px; cursor: pointer"><span class="ms" aria-hidden="true" style="font-size: 18px">share</span>Bagikan</button>
+      </sc-if>
+
+      <!-- QUICK REPORT -->
+      <sc-if value="{{isQuick}}" hint-placeholder-val="{{false}}">
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 400">Apa yang kamu lihat?</h2>
+          <button aria-label="Batal" onClick="{{goHome}}" style="width: 40px; height: 40px; border: 0; background: #E1E2E8; border-radius: 20px; color: #43474E; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0"><span class="ms" aria-hidden="true">close</span></button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 16px; min-height: 56px">
+          <span class="ms" aria-hidden="true" style="color: #43474E">location_on</span>
+          <span style="flex: 1; display: flex; flex-direction: column">
+            <span style="font-size: 16px; line-height: 24px; letter-spacing: 0.5px">Jl. Pasteur, Coblong</span>
+            <span style="font-size: 14px; line-height: 20px; color: #43474E">Lokasimu sekarang</span>
+          </span>
+          <button onClick="{{moveHint}}" style="height: 40px; padding: 0 12px; border-radius: 20px; border: 0; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; cursor: pointer">Ubah</button>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+          <sc-for list="{{tiles}}" as="t" hint-placeholder-count="5">
+            <button onClick="{{t.pick}}" style="min-height: 96px; border: 1px solid #C3C7CF; border-radius: 12px; background: #FFFFFF; padding: 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; font: inherit; color: inherit; cursor: pointer">
+              <span class="ms" aria-hidden="true" style="color: #0061A4; font-size: 28px">{{t.icon}}</span>
+              <span style="font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: 0.15px">{{t.label}}</span>
+              <span style="font-size: 12px; line-height: 16px; color: #43474E">{{t.hint}}</span>
+            </button>
+          </sc-for>
+        </div>
+        <span style="font-size: 12px; line-height: 16px; color: #43474E">Satu ketukan langsung mengirim laporan. Detail bisa ditambah setelahnya.</span>
+      </sc-if>
+
+      <!-- DUPLICATE CHECK -->
+      <sc-if value="{{isDup}}" hint-placeholder-val="{{false}}">
+        <h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 400">Sudah ada yang melaporkan</h2>
+        <span style="font-size: 14px; line-height: 20px; color: #43474E">Ada laporan {{dup.labelLower}} {{dup.dist}} dari kamu. Kalau ini kejadian yang sama, cukup pastikan saja. Laporan jadi lebih cepat dipercaya.</span>
+        <div style="border: 1px solid #C3C7CF; border-radius: 12px; padding: 12px 16px; display: flex; gap: 16px; align-items: center">
+          <span class="ms" aria-hidden="true" style="color: #43474E">{{dup.icon}}</span>
+          <span style="flex: 1; display: flex; flex-direction: column">
+            <span style="font-size: 16px; line-height: 24px; letter-spacing: 0.5px">{{dup.title}}</span>
+            <span style="font-size: 14px; line-height: 20px; color: #43474E">{{dup.place}} · {{dup.ago}} · {{dup.statusShort}}</span>
+          </span>
+        </div>
+        <button onClick="{{dupSame}}" style="height: 40px; border-radius: 20px; border: 0; background: #0061A4; color: #FFFFFF; font: inherit; font-weight: 500; letter-spacing: 0.1px; cursor: pointer">Ya, sama. Pastikan laporan ini</button>
+        <button onClick="{{dupNew}}" style="height: 40px; border-radius: 20px; border: 1px solid #73777F; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; cursor: pointer">Bukan, kirim laporan baru</button>
+      </sc-if>
+
+      <!-- SENT -->
+      <sc-if value="{{isSent}}" hint-placeholder-val="{{false}}">
+        <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px">
+          <span class="ms fill" aria-hidden="true" style="font-size: 48px; color: #0061A4">check_circle</span>
+          <h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 400">Laporan {{sentLabel}} terkirim</h2>
+          <span style="font-size: 14px; line-height: 20px; color: #43474E">Warga di sekitar akan diminta memastikan. Kami kabari kalau sudah dipastikan.</span>
+        </div>
+        <div style="height: 1px; background: #C3C7CF"></div>
+        <span style="font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px">Tambah detail <span style="font-weight: 400; color: #43474E">(opsional, bikin lebih cepat dipercaya)</span></span>
+        <div role="group" aria-label="Seberapa parah" style="display: flex; border: 1px solid #73777F; border-radius: 20px; overflow: hidden">
+          <sc-for list="{{sevs}}" as="sv" hint-placeholder-count="3">
+            <button aria-pressed="{{sv.pressed}}" onClick="{{sv.pick}}" style="{{sv.style}}">
+              <sc-if value="{{sv.on}}" hint-placeholder-val="{{false}}"><span class="ms" aria-hidden="true" style="font-size: 18px">check</span></sc-if>
+              {{sv.label}}
+            </button>
+          </sc-for>
+        </div>
+        <button onClick="{{addPhoto}}" style="height: 40px; border-radius: 20px; border: 1px solid #73777F; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer"><span class="ms" aria-hidden="true" style="font-size: 18px">photo_camera</span>Tambah foto</button>
+        <button onClick="{{goHome}}" style="height: 40px; border-radius: 20px; border: 0; background: #0061A4; color: #FFFFFF; font: inherit; font-weight: 500; letter-spacing: 0.1px; cursor: pointer">Selesai</button>
+      </sc-if>
+
+      <!-- SIGN IN -->
+      <sc-if value="{{isSignin}}" hint-placeholder-val="{{false}}">
+        <h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 400">Masuk untuk {{reason}}</h2>
+        <span style="font-size: 14px; line-height: 20px; color: #43474E">Akun membuat laporanmu lebih dipercaya warga lain. Namamu tidak ditampilkan. Di peta kamu tampil sebagai “Warga”.</span>
+        <button onClick="{{signIn}}" style="height: 40px; border-radius: 20px; border: 1px solid #73777F; background: transparent; color: #191C20; font: inherit; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer">
+          <span aria-hidden="true" style="width: 18px; height: 18px; border-radius: 9px; border: 2px solid #191C20; box-sizing: border-box; font-size: 10px; line-height: 14px; font-weight: 700; text-align: center">G</span>
+          Masuk dengan Google
+        </button>
+        <button onClick="{{back}}" style="height: 40px; border-radius: 20px; border: 0; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; cursor: pointer">Nanti saja</button>
+      </sc-if>
+
+      <!-- ROUTE -->
+      <sc-if value="{{isRoute}}" hint-placeholder-val="{{false}}">
+        <div style="display: flex; gap: 8px; align-items: center">
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 16px; border-radius: 4px; border: 1px solid #73777F">
+              <span class="ms" aria-hidden="true" style="color: #4285F4; font-size: 20px">my_location</span>Lokasi saya
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 16px; border-radius: 4px; border: 1px solid #73777F">
+              <span class="ms fill" aria-hidden="true" style="color: #BA1A1A; font-size: 20px">location_on</span>{{place.name}}
+            </div>
+          </div>
+          <button aria-label="Tukar asal dan tujuan" onClick="{{noop}}" style="width: 48px; height: 48px; border: 0; background: transparent; border-radius: 24px; color: #43474E; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0"><span class="ms" aria-hidden="true">swap_vert</span></button>
+        </div>
+        <sc-for list="{{routes}}" as="rt" hint-placeholder-count="2">
+          <button aria-pressed="{{rt.pressed}}" onClick="{{rt.pick}}" style="{{rt.style}}">
+            <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+              <span style="font-size: 22px; line-height: 28px">{{rt.dur}}</span>
+              <span style="font-size: 14px; color: #43474E">{{rt.dist}}</span>
+              <span style="{{rt.riskPill}}">{{rt.risk}}</span>
+              <sc-if value="{{rt.rec}}" hint-placeholder-val="{{false}}">
+                <span style="font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0.5px; color: #0061A4; margin-left: auto">Disarankan</span>
+              </sc-if>
+            </span>
+            <span style="font-size: 14px; line-height: 20px; color: #43474E">{{rt.reason}}</span>
+          </button>
+        </sc-for>
+        <button onClick="{{startNav}}" style="height: 40px; border-radius: 20px; border: 0; background: #0061A4; color: #FFFFFF; font: inherit; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer"><span class="ms" aria-hidden="true" style="font-size: 18px">navigation</span>Mulai di aplikasi navigasi</button>
+      </sc-if>
+
+      <!-- LIST -->
+      <sc-if value="{{isList}}" hint-placeholder-val="{{false}}">
+        <div style="display: flex; justify-content: space-between; align-items: baseline">
+          <h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 400">Laporan di sekitar</h2>
+          <span style="font-size: 12px; line-height: 16px; color: #43474E">{{shownCount}} laporan</span>
+        </div>
+        <div style="display: flex; flex-direction: column">
+          <sc-for list="{{listItems}}" as="n" hint-placeholder-count="5">
+            <button onClick="{{n.open}}" style="display: flex; align-items: center; gap: 16px; min-height: 72px; border: 0; background: transparent; padding: 8px 0; text-align: left; font: inherit; color: inherit; cursor: pointer">
+              <span class="ms" aria-hidden="true" style="color: #43474E; flex: none">{{n.icon}}</span>
+              <span style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+                <span style="font-size: 16px; line-height: 24px; letter-spacing: 0.5px">{{n.title}}</span>
+                <span style="font-size: 14px; line-height: 20px; color: #43474E">{{n.place}} · {{n.dist}} · {{n.statusShort}}</span>
+              </span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- ALERTS -->
+      <sc-if value="{{isAlerts}}" hint-placeholder-val="{{false}}">
+        <h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 400">Notifikasi</h2>
+        <div style="background: #ECEEF4; border-radius: 12px; padding: 16px; display: flex; gap: 16px; align-items: center">
+          <span class="ms fill" aria-hidden="true" style="color: #0061A4; font-size: 32px">workspace_premium</span>
+          <span style="display: flex; flex-direction: column">
+            <span style="font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: 0.15px">Pelapor Aktif</span>
+            <span style="font-size: 14px; line-height: 20px; color: #43474E">Minggu ini: 3 laporan, 7 kali memastikan. Laporanmu dilihat 214 warga.</span>
+          </span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <span style="font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px">Area pantauan</span>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap">
+            <span style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 8px; border-radius: 8px; border: 1px solid #73777F; font-size: 14px; font-weight: 500; letter-spacing: 0.1px"><span class="ms" aria-hidden="true" style="font-size: 18px; color: #43474E">home</span>Rumah · Waspada</span>
+            <span style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 8px; border-radius: 8px; border: 1px solid #73777F; font-size: 14px; font-weight: 500; letter-spacing: 0.1px"><span class="ms" aria-hidden="true" style="font-size: 18px; color: #43474E">work</span>Kantor · Aman</span>
+            <button onClick="{{watch}}" style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 8px; border-radius: 8px; border: 1px solid #73777F; background: transparent; color: #0061A4; font: inherit; font-weight: 500; letter-spacing: 0.1px; cursor: pointer"><span class="ms" aria-hidden="true" style="font-size: 18px">add</span>Tambah</button>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column">
+          <sc-for list="{{alerts}}" as="al" hint-placeholder-count="4">
+            <button onClick="{{al.open}}" style="display: flex; gap: 16px; align-items: flex-start; border: 0; background: transparent; padding: 12px 0; text-align: left; font: inherit; color: inherit; cursor: pointer">
+              <span class="ms" aria-hidden="true" style="color: #43474E; flex: none; margin-top: 2px">{{al.icon}}</span>
+              <span style="flex: 1; display: flex; flex-direction: column">
+                <span style="{{al.titleStyle}}">{{al.title}}</span>
+                <span style="font-size: 14px; line-height: 20px; color: #43474E">{{al.body}}</span>
+              </span>
+              <span style="font-size: 11px; line-height: 16px; color: #43474E; flex: none">{{al.ago}}</span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"start":{"editor":"enum","options":["home","homeHalf","search","place","route","filter","report","quick","dup","sent","list","alerts","signin"],"default":"home","section":"Prototipe"},"signedIn":{"editor":"boolean","default":false,"section":"Prototipe"},"risk":{"editor":"enum","options":["safe","caution","danger"],"default":"caution","section":"Data"},"dataStatus":{"editor":"enum","options":["live","mock","stale","offline"],"default":"mock","section":"Data"},"$preview":{"width":390,"height":844}}'>
+var KS_CATS = {
+  flood: { label: 'Banjir', hint: 'Genangan, air naik', icon: 'flood', ask: function (p) { return 'Masih ada genangan di ' + p + '?'; }, yes: 'Masih ada', no: 'Sudah surut', exp: 'dalam ±3 jam' },
+  accident: { label: 'Kecelakaan', hint: 'Tabrakan, kendaraan terguling', icon: 'car_crash', ask: function (p) { return 'Kecelakaan di ' + p + ' masih menghambat jalan?'; }, yes: 'Masih', no: 'Sudah bersih', exp: 'dalam ±2 jam' },
+  road_damage: { label: 'Jalan rusak', hint: 'Lubang, aspal amblas', icon: 'construction', ask: function (p) { return 'Kerusakan di ' + p + ' masih ada?'; }, yes: 'Masih ada', no: 'Sudah diperbaiki', exp: 'dalam ±7 hari' },
+  road_closure: { label: 'Jalan ditutup', hint: 'Ditutup, dialihkan', icon: 'block', ask: function (p) { return p + ' masih ditutup?'; }, yes: 'Masih ditutup', no: 'Sudah dibuka', exp: 'dalam ±6 jam' },
+  event_crowd: { label: 'Keramaian', hint: 'Acara, massa, macet', icon: 'groups', ask: function (p) { return 'Masih ramai di ' + p + '?'; }, yes: 'Masih ramai', no: 'Sudah sepi', exp: 'dalam ±4 jam' }
+};
+var KS_ORDER = ['flood', 'accident', 'road_damage', 'road_closure', 'event_crowd'];
+var KS_BASE = [
+  { id: 'r1', cat: 'flood', title: 'Genangan setinggi 30 cm', place: 'Jl. Pasteur', dist: '180 m', distM: 180, ago: '12 menit lalu', status: 'waiting', conf: 1, x: 150, y: 365, sev: 'Sedang', expires: 'dalam ±2 jam', by: 'Warga · Pelapor Aktif' },
+  { id: 'r2', cat: 'accident', title: 'Tabrakan motor, satu lajur tertutup', place: 'Jl. Ir. H. Juanda', dist: '650 m', distM: 650, ago: '25 menit lalu', status: 'verified', conf: 5, x: 296, y: 250, sev: 'Berat', expires: 'dalam ±1 jam', by: 'Warga · Warga Terpercaya' },
+  { id: 'r3', cat: 'road_damage', title: 'Lubang besar di lajur kiri', place: 'Jl. Ir. H. Juanda', dist: '900 m', distM: 900, ago: '2 jam lalu', status: 'verified', conf: 4, x: 291, y: 600, sev: 'Sedang', expires: 'dalam ±6 hari', by: 'Warga · Warga Baru' },
+  { id: 'r4', cat: 'event_crowd', title: 'Konser di Sabuga, lalu lintas padat', place: 'Jl. Tamansari', dist: '1,2 km', distM: 1200, ago: '40 menit lalu', status: 'waiting', conf: 0, x: 158, y: 214, sev: 'Ringan', expires: 'dalam ±3 jam', by: 'Warga · Pelapor Aktif' },
+  { id: 'r5', cat: 'road_closure', title: 'Ditutup untuk perbaikan pipa', place: 'Jl. Merdeka', dist: '1,4 km', distM: 1400, ago: '1 jam lalu', status: 'verified', conf: 6, x: 236, y: 546, sev: 'Sedang', expires: 'dalam ±5 jam', by: 'Warga · Warga Terpercaya' }
+];
+var KS_SPAWN = { id: 'r6', cat: 'flood', title: 'Air naik di underpass', place: 'Jl. Cihampelas', dist: '520 m', distM: 520, ago: 'Baru saja', status: 'waiting', conf: 0, x: 103, y: 470, sev: 'Berat', expires: 'dalam ±3 jam', by: 'Warga · Warga Baru' };
+var KS_LABEL = 'height: 28px; padding: 0 10px; border-radius: 8px; font-size: 12px; line-height: 28px; font-weight: 500; letter-spacing: 0.5px; flex: none; box-sizing: border-box; ';
+var KS_PILL = { safe: KS_LABEL + 'background: #C4EED0; color: #00210E', caution: KS_LABEL + 'background: #FFDDB3; color: #2A1800', danger: KS_LABEL + 'background: #FFDAD6; color: #410002' };
+var KS_RISK = {
+  safe: { label: 'Aman', headline: 'Aman untuk bepergian', why: 'Cuaca cerah dan tidak ada kejadian yang sudah dipastikan warga dalam 500 m.', temp: '29°', cond: 'Cerah', icon: 'sunny', pill: KS_PILL.safe, rain: [0, 0, 0, 1, 2, 0] },
+  caution: { label: 'Waspada', headline: 'Hati-hati, ada genangan', why: 'Hujan lebat dan 1 genangan di Jl. Pasteur yang sedang dipastikan warga. Hindari jalan rendah sampai sore.', temp: '27°', cond: 'Hujan lebat', icon: 'rainy', pill: KS_PILL.caution, rain: [22, 15, 8, 3, 0, 0] },
+  danger: { label: 'Bahaya', headline: 'Tunda perjalanan dulu', why: 'Banjir sudah dipastikan warga dan ada sinyal bencana resmi di dekatmu. Jangan melintas di Jl. Pasteur.', temp: '25°', cond: 'Badai', icon: 'thunderstorm', pill: KS_PILL.danger, rain: [44, 38, 30, 18, 9, 4] }
+};
+var KS_RISKCOL = {
+  caution: { zone: 'rgba(242,153,0,.30)', line: '#F29900', bg: '#FFDDB3', text: '#2A1800', label: 'Waspada' },
+  danger: { zone: 'rgba(186,26,26,.28)', line: '#BA1A1A', bg: '#FFDAD6', text: '#410002', label: 'Bahaya' }
+};
+var KS_PLACES = [
+  { id: 'itb', name: 'Kampus ITB Ganesha', short: 'Kampus ITB', addr: 'Jl. Ganesha No. 10', dist: '2,1 km', icon: 'history', x: 262, y: 190, risk: 'caution', note: 'Jalan tercepat lewat genangan di Jl. Pasteur. Ada rute lain lewat Jl. Ir. H. Juanda yang aman.',
+    lineA: 'M196 440 L292 432 L296 190 L262 190', lineB: 'M196 440 L176 368 L170 300 L262 190',
+    routes: [
+      { id: 'a', rec: true, dur: '14 mnt', dist: '5,1 km', risk: 'safe', reason: 'Lewat Jl. Ir. H. Juanda, menghindari genangan di Jl. Pasteur.' },
+      { id: 'b', rec: false, dur: '11 mnt', dist: '4,3 km', risk: 'caution', reason: 'Lebih cepat, tapi melewati genangan di Jl. Pasteur yang belum dipastikan.' }
+    ] },
+  { id: 'pmi', name: 'PMI Kota Bandung', short: 'PMI Kota Bandung', addr: 'Jl. Aceh No. 79', dist: '3,0 km', icon: 'history', x: 318, y: 690, risk: 'caution', note: 'Jl. Merdeka ditutup untuk perbaikan pipa (sudah dipastikan warga). Rute yang disarankan memutar lewat Jl. Ir. H. Juanda.',
+    lineA: 'M196 440 L290 436 L288 690 L318 690', lineB: 'M196 440 L214 520 L232 690 L318 690',
+    routes: [
+      { id: 'a', rec: true, dur: '16 mnt', dist: '6,0 km', risk: 'safe', reason: 'Lewat Jl. Ir. H. Juanda, menghindari penutupan di Jl. Merdeka.' },
+      { id: 'b', rec: false, dur: '12 mnt', dist: '4,9 km', risk: 'caution', reason: 'Melewati Jl. Merdeka yang sedang ditutup. Kemungkinan dialihkan.' }
+    ] },
+  { id: 'bip', name: 'Bandung Indah Plaza', short: 'BIP', addr: 'Jl. Merdeka No. 56', dist: '1,6 km', icon: 'history', x: 120, y: 300, risk: 'danger', note: 'Jalan terdekat melewati genangan di Jl. Pasteur. Rute yang disarankan sedikit memutar.',
+    lineA: 'M196 440 L210 330 L170 300 L120 300', lineB: 'M196 440 L150 365 L120 300',
+    routes: [
+      { id: 'a', rec: true, dur: '9 mnt', dist: '2,4 km', risk: 'safe', reason: 'Memutar lewat Jl. Tamansari, tidak melewati genangan.' },
+      { id: 'b', rec: false, dur: '7 mnt', dist: '1,9 km', risk: 'danger', reason: 'Langsung lewat genangan di Jl. Pasteur.' }
+    ] },
+  { id: 'home', name: 'Rumah', short: 'Rumah', addr: 'Area pantauan · Jl. Cihampelas', dist: '1,1 km', icon: 'home', x: 98, y: 560, risk: 'caution', note: 'Ada laporan air naik di underpass Cihampelas. Belum dipastikan warga.',
+    lineA: 'M196 440 L206 520 L110 548 L98 560', lineB: 'M196 440 L104 466 L98 560',
+    routes: [
+      { id: 'a', rec: true, dur: '8 mnt', dist: '2,2 km', risk: 'safe', reason: 'Lewat Jl. Merdeka bagian utara, menghindari underpass.' },
+      { id: 'b', rec: false, dur: '6 mnt', dist: '1,7 km', risk: 'caution', reason: 'Melewati underpass Cihampelas yang dilaporkan tergenang.' }
+    ] }
+];
+var KS_STATUS = [['all', 'Semua'], ['verified', 'Sudah dipastikan'], ['waiting', 'Perlu dipastikan']];
+var KS_ELEV = 'box-shadow: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px 1px rgba(0,0,0,.15); ';
+function ksNew(cat, n) {
+  var c = KS_CATS[cat];
+  return { id: 'u' + n, cat: cat, title: c.label + ' di Jl. Pasteur', place: 'Jl. Pasteur', dist: '20 m', distM: 20, ago: 'baru saja', status: 'waiting', conf: 0, x: 210, y: 452, sev: 'Belum diisi', expires: c.exp, by: 'kamu', mine: true };
+}
+function ksTime(ticks) {
+  var t = 10 * 3600 + 15 * 60 + 3 + ticks * 5;
+  var h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+}
+function ksMatch(r, cats, status) {
+  var anyCat = KS_ORDER.some(function (k) { return cats[k]; });
+  var v = r.status === 'verified' || r.conf >= 3;
+  return (!anyCat || cats[r.cat]) && (status === 'all' || (status === 'verified' ? v : !v));
+}
+
+class Component extends DCLogic {
+  componentDidMount() { this.iv = setInterval(() => this.tick(), 5000); }
+  componentWillUnmount() { clearInterval(this.iv); clearTimeout(this.tt); }
+  tick() {
+    const b = this.b();
+    const t = (this.state && this.state.ticks || 0) + 1;
+    const patch = { ticks: t };
+    if (t === 3 && !b.extra.some((r) => r.id === 'r6')) {
+      patch.extra = b.extra.concat([KS_SPAWN]);
+      this.toast('Laporan baru di dekatmu: ' + KS_SPAWN.title);
+    }
+    this.setState(patch);
+  }
+  toast(msg) {
+    clearTimeout(this.tt);
+    this.setState({ toast: msg });
+    this.tt = setTimeout(() => this.setState({ toast: null }), 3500);
+  }
+  b() {
+    const p = this.props || {};
+    const s = this.state || {};
+    const start = p.start || 'home';
+    const startFilter = start === 'filter';
+    return {
+      start: start,
+      view: s.view || (start === 'homeHalf' ? 'home' : start),
+      half: s.half !== undefined ? s.half : start === 'homeHalf',
+      signedIn: s.signedIn !== undefined ? s.signedIn : !!p.signedIn,
+      hist: s.hist || [],
+      votes: s.votes || {},
+      dismissed: s.dismissed || {},
+      extra: s.extra || (start === 'sent' ? [ksNew('road_damage', 1)] : []),
+      sel: s.sel || (start === 'sent' ? 'u1' : 'r1'),
+      placeId: s.placeId || 'itb',
+      fcats: s.fcats || {},
+      fstatus: s.fstatus || 'all',
+      dcats: s.dcats || (startFilter ? { flood: true } : {}),
+      dstatus: s.dstatus || (startFilter ? 'waiting' : 'all'),
+      dupId: s.dupId || 'r1',
+      lastCat: s.lastCat || (start === 'sent' ? 'road_damage' : 'flood'),
+      sev: s.sev || null,
+      route: s.route || 'a'
+    };
+  }
+  gp(view, extra, b) {
+    return Object.assign({ view: view, half: false, layersOpen: false, hist: b.hist.concat([b.view]).slice(-5) }, extra || {});
+  }
+  go(view, extra) { this.setState(this.gp(view, extra, this.b())); }
+  goHome() { this.setState({ view: 'home', half: false, hist: [], layersOpen: false }); }
+  back() {
+    const b = this.b();
+    const h = b.hist.slice();
+    let prev = h.pop() || 'home';
+    if (prev === 'signin' || prev === 'filter') prev = 'home';
+    this.setState({ view: prev, hist: h, half: false, pending: null });
+  }
+  need(a, reason) {
+    const b = this.b();
+    if (b.signedIn) this.setState(this.run(a, b));
+    else this.setState(this.gp('signin', { pending: a, reason: reason }, b));
+  }
+  run(a, b) {
+    if (a.type === 'vote') {
+      const votes = Object.assign({}, b.votes);
+      votes[a.id] = a.val;
+      this.toast('Terima kasih! Jawabanmu membantu warga lain.');
+      return Object.assign({ votes: votes }, a.then ? this.gp(a.then, { sel: a.id, hist: [] }, b) : {});
+    }
+    if (a.type === 'submit') {
+      const n = b.extra.filter((r) => r.mine).length + 1;
+      const r = ksNew(a.cat, n);
+      return Object.assign({ extra: b.extra.concat([r]), lastCat: a.cat, sev: null }, this.gp('sent', { sel: r.id, hist: [] }, b));
+    }
+    if (a.type === 'watch') { this.toast('Area ini sekarang kamu pantau'); return {}; }
+    if (a.type === 'alerts') return this.gp('alerts', {}, b);
+    return {};
+  }
+  signIn() {
+    const s = this.state || {};
+    const b0 = this.b();
+    const h = b0.hist.slice();
+    const prev = h.pop() || 'home';
+    const b1 = Object.assign({}, b0, { view: prev, hist: h, signedIn: true });
+    this.setState(Object.assign({ signedIn: true, view: prev, hist: h, pending: null }, s.pending ? this.run(s.pending, b1) : {}));
+  }
+  enrich(r, b) {
+    const c = KS_CATS[r.cat];
+    const v = b.votes[r.id];
+    const conf = r.conf + (v === 'yes' ? 1 : 0);
+    const verified = r.status === 'verified' || conf >= 3;
+    const near = r.distM <= 500;
+    const selected = b.view === 'report' && b.sel === r.id;
+    const size = selected ? 48 : 40;
+    let pin = 'position: absolute; left: ' + (r.x - size / 2) + 'px; top: ' + (r.y - size / 2) + 'px; width: ' + size + 'px; height: ' + size + 'px; border-radius: ' + size / 2 + 'px; display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; box-sizing: border-box; ';
+    if (r.mine) pin += 'background: #D1E4FF; color: #001D36; border: 2px dashed #0061A4; ';
+    else if (verified) pin += 'background: #2E3135; color: #EFF0F7; border: 2px solid #FFFFFF; ';
+    else pin += 'background: #FFFFFF; color: #191C20; border: 2px dashed #43474E; ';
+    pin += selected ? 'box-shadow: 0 0 0 4px rgba(0,97,164,.45), 0 1px 3px rgba(0,0,0,.3)' : 'box-shadow: 0 1px 3px rgba(0,0,0,.3), 0 1px 2px rgba(0,0,0,.15)';
+    const statusShort = verified ? 'Dipastikan ' + conf + ' warga' : 'Perlu dipastikan (' + conf + '/3)';
+    return Object.assign({}, r, {
+      label: c.label,
+      labelLower: c.label.toLowerCase(),
+      icon: c.icon,
+      q: c.ask(r.place),
+      yesL: c.yes,
+      noL: c.no,
+      conf: conf,
+      isVerified: verified,
+      isWaiting: !verified,
+      statusShort: statusShort,
+      progStyle: 'width: ' + Math.min(100, Math.round(conf / 3 * 100)) + '%; height: 100%; background: #0061A4; border-radius: 2px',
+      canVote: near && !v && !r.mine,
+      far: !near && !v && !r.mine,
+      voted: !!v,
+      votedText: 'Kamu menjawab: ' + (v === 'yes' ? c.yes : c.no),
+      mine: !!r.mine,
+      pinStyle: pin,
+      aria: c.label + ', ' + statusShort.toLowerCase() + ', ' + r.dist,
+      open: () => this.go('report', { sel: r.id }),
+      voteYes: () => this.need({ type: 'vote', id: r.id, val: 'yes' }, 'ikut memastikan laporan'),
+      voteNo: () => this.need({ type: 'vote', id: r.id, val: 'no' }, 'ikut memastikan laporan'),
+      skip: () => { const d = Object.assign({}, this.b().dismissed); d[r.id] = true; this.setState({ dismissed: d }); }
+    });
+  }
+  renderVals() {
+    const p = this.props || {};
+    const s = this.state || {};
+    const b = this.b();
+    const view = b.view;
+    const riskKey = p.risk || 'caution';
+    const risk = KS_RISK[riskKey];
+    const dataStatus = p.dataStatus || 'mock';
+
+    const all = KS_BASE.concat(b.extra).map((r) => this.enrich(r, b));
+    const filtered = all.filter((r) => ksMatch(r, b.fcats, b.fstatus));
+    const byDist = filtered.slice().sort((x, y) => x.distM - y.distM);
+    const rep = all.find((r) => r.id === b.sel) || all[0];
+    const dupRaw = all.find((r) => r.id === b.dupId) || all[0];
+    const activeCats = KS_ORDER.filter((k) => b.fcats[k]);
+    const filterCount = activeCats.length + (b.fstatus !== 'all' ? 1 : 0);
+    const isFiltered = filterCount > 0;
+
+    const placeRaw = KS_PLACES.find((x) => x.id === b.placeId) || KS_PLACES[0];
+    const place = Object.assign({}, placeRaw, { riskLabel: KS_RISK[placeRaw.risk].label, riskPill: KS_PILL[placeRaw.risk] });
+
+    const target = all.find((r) => r.isWaiting && r.distM <= 500 && !r.voted && !r.mine && !b.dismissed[r.id]);
+    const showVerifyCard = view === 'home' && !!target;
+
+    const heights = { report: 520, quick: 600, dup: 440, sent: 560, signin: 360, route: 470, list: 716, alerts: 716, filter: 716, search: 716, place: 330 };
+    let h = heights[view] || 0;
+    if (view === 'home') h = b.half ? 600 : (showVerifyCard ? 300 : 140);
+
+    // Risk drawn as it exists on the ground: a soft zone around the affected area and the affected stretch of road.
+    const zoneDefs = [
+      { level: riskKey, d: 'M104 352 C112 318 168 306 206 324 C244 342 254 394 234 426 C212 458 158 466 126 444 C96 424 96 384 104 352 Z', lx: 214, ly: 452, text: 'Hujan lebat' },
+      { level: riskKey === 'safe' ? 'caution' : (riskKey === 'danger' ? 'danger' : null), d: 'M118 346 C128 330 166 330 178 348 C190 366 180 390 160 394 C138 398 110 380 118 346 Z', lx: 92, ly: 322, text: 'Genangan' },
+      { level: 'caution', d: 'M262 228 C280 220 312 230 318 250 C324 272 304 286 284 282 C262 278 250 262 252 246 C254 236 256 230 262 228 Z', lx: 306, ly: 280, text: 'Kecelakaan' }
+    ].filter((z) => z.level && z.level !== 'safe');
+    const zones = zoneDefs.map((z) => ({ d: z.d, style: 'fill: ' + KS_RISKCOL[z.level].zone + '; filter: url(#ks-soft)' }));
+    const zoneLabels = zoneDefs.map((z) => {
+      const k = KS_RISKCOL[z.level];
+      return { icon: 'warning', text: k.label + ' · ' + z.text, style: 'position: absolute; left: ' + z.lx + 'px; top: ' + z.ly + 'px; display: flex; align-items: center; gap: 3px; font-size: 11px; line-height: 16px; font-weight: 500; letter-spacing: 0.4px; color: ' + k.text + '; background: ' + k.bg + '; padding: 2px 6px 2px 4px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.25); white-space: nowrap' };
+    });
+    const segDefs = [
+      { level: riskKey === 'danger' ? 'danger' : 'caution', d: 'M88 365 C128 360 180 356 236 349' },
+      { level: 'caution', d: 'M298 200 C297 240 296 270 296 300' }
+    ];
+    const segments = segDefs.map((sg) => ({ d: sg.d, style: 'fill: none; stroke: ' + KS_RISKCOL[sg.level].line + '; stroke-width: 6; stroke-linecap: round' }));
+
+    const chipBase = 'flex: none; height: 32px; border-radius: 8px; font: inherit; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; gap: 8px; cursor: pointer; border: 0; ' + KS_ELEV;
+    const chips = KS_ORDER.map((k) => {
+      const on = !!b.fcats[k];
+      return {
+        label: KS_CATS[k].label,
+        on: on,
+        pressed: on ? 'true' : 'false',
+        style: chipBase + (on ? 'padding: 0 16px 0 8px; background: #D7E3F7; color: #101C2B' : 'padding: 0 16px; background: #F2F3FA; color: #43474E'),
+        toggle: () => { const f = Object.assign({}, this.b().fcats); f[k] = !f[k]; this.setState({ fcats: f }); }
+      };
+    });
+
+    const strip = {
+      live: ['Diperbarui ' + ksTime(s.ticks || 0), 'background: #ECEEF4; color: #191C20'],
+      mock: ['Diperbarui ' + ksTime(s.ticks || 0), 'background: #ECEEF4; color: #191C20'],
+      stale: ['Sebagian data mungkin tidak terbaru', 'background: #FFDDB3; color: #2A1800'],
+      offline: ['Tidak ada koneksi · data terakhir 10:12', 'background: #2E3135; color: #EFF0F7']
+    }[dataStatus];
+
+    const draftCats = KS_ORDER.map((k) => ({
+      label: KS_CATS[k].label,
+      icon: KS_CATS[k].icon,
+      count: String(all.filter((r) => r.cat === k).length),
+      on: !!b.dcats[k],
+      toggle: () => { const d = Object.assign({}, this.b().dcats); d[k] = !d[k]; this.setState({ dcats: d }); }
+    }));
+    const draftStatus = KS_STATUS.map((st) => ({ label: st[1], on: b.dstatus === st[0], pick: () => this.setState({ dstatus: st[0] }) }));
+    const draftN = all.filter((r) => ksMatch(r, b.dcats, b.dstatus)).length;
+
+    const sevs = ['Ringan', 'Sedang', 'Berat'].map((l, i) => {
+      const on = b.sev === l;
+      return { label: l, on: on, pressed: on ? 'true' : 'false', style: 'flex: 1; height: 40px; border: 0; ' + (i > 0 ? 'border-left: 1px solid #73777F; ' : '') + 'font: inherit; font-weight: 500; letter-spacing: 0.1px; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; ' + (on ? 'background: #D7E3F7; color: #101C2B' : 'background: transparent; color: #191C20'), pick: () => this.setState({ sev: l }) };
+    });
+
+    const tiles = KS_ORDER.map((k) => ({
+      label: KS_CATS[k].label, hint: KS_CATS[k].hint, icon: KS_CATS[k].icon,
+      pick: () => {
+        const bb = this.b();
+        const dup = KS_BASE.concat(bb.extra).find((r) => r.cat === k && r.distM <= 300 && !r.mine);
+        if (dup) this.go('dup', { dupId: dup.id, lastCat: k });
+        else this.need({ type: 'submit', cat: k }, 'mengirim laporan');
+      }
+    }));
+
+    const places = KS_PLACES.map((pl) => Object.assign({}, pl, { pick: () => this.go('place', { placeId: pl.id, route: 'a' }) }));
+
+    const routes = place.routes.map((r) => {
+      const on = b.route === r.id;
+      return Object.assign({}, r, {
+        risk: KS_RISK[r.risk].label,
+        riskPill: KS_PILL[r.risk],
+        pressed: on ? 'true' : 'false',
+        style: 'display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; border-radius: 12px; text-align: left; font: inherit; color: inherit; cursor: pointer; ' + (on ? 'background: #ECEEF4; border: 2px solid #0061A4' : 'background: #FFFFFF; border: 1px solid #C3C7CF'),
+        pick: () => this.setState({ route: r.id })
+      });
+    });
+    const lineOn = 'fill: none; stroke: #0061A4; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round';
+    const lineOff = 'fill: none; stroke: #9CBDE0; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round';
+
+    const alertDefs = [
+      { title: 'Laporanmu sudah dipastikan', body: 'Lubang di Jl. Ir. H. Juanda dibenarkan 4 warga. Sudah dilihat 86 orang.', ago: '5 mnt', unread: true, icon: 'verified', target: 'r3' },
+      { title: 'Bantu pastikan', body: 'Jl. Merdeka dekat Kantor dilaporkan ditutup. Kamu sering lewat sini?', ago: '20 mnt', unread: true, icon: 'help', target: 'r5' },
+      { title: 'Risiko naik di Rumah', body: 'Waspada: hujan lebat dan genangan di Jl. Pasteur.', ago: '32 mnt', unread: false, icon: 'warning', target: null },
+      { title: 'Naik level: Pelapor Aktif', body: '5 laporanmu sudah dipastikan warga. Laporan berikutnya lebih cepat dipercaya.', ago: '1 hari', unread: false, icon: 'workspace_premium', target: null }
+    ];
+    const alerts = alertDefs.map((a) => ({
+      title: a.title, body: a.body, ago: a.ago, icon: a.icon,
+      titleStyle: 'font-size: 16px; line-height: 24px; letter-spacing: 0.15px; font-weight: ' + (a.unread ? 500 : 400),
+      open: () => { if (a.target) this.go('report', { sel: a.target }); else this.goHome(); }
+    }));
+
+    const ctrlVisible = h <= 600 && ['home', 'report', 'route', 'dup', 'place'].indexOf(view) >= 0 && !(view === 'home' && b.half);
+    const ctrlBottom = h + 16;
+    const placeLike = view === 'place' || view === 'route';
+
+    return {
+      isHome: view === 'home', notHome: view !== 'home', isReport: view === 'report', isQuick: view === 'quick',
+      isDup: view === 'dup', isSent: view === 'sent', isSignin: view === 'signin', isRoute: view === 'route',
+      isList: view === 'list', isAlerts: view === 'alerts', isFilter: view === 'filter', isSearch: view === 'search', isPlace: view === 'place',
+      half: b.half,
+      signedIn: b.signedIn, signedOut: !b.signedIn,
+      avatarLabel: b.signedIn ? 'Notifikasi dan akun, 2 belum dibaca' : 'Masuk',
+      searchPlaceholder: placeLike ? place.name : 'Cari tempat atau laporan',
+      showChips: h <= 600 && !placeLike,
+      showScrim: view === 'filter',
+      showRisk: s.showRisk !== undefined ? s.showRisk : true,
+      showPins: s.showPins !== undefined ? s.showPins : true,
+      zones: zones, zoneLabels: zoneLabels, segments: segments,
+      pins: filtered,
+      chips: chips,
+      filterChipStyle: chipBase + (isFiltered ? 'padding: 0 12px 0 8px; background: #D7E3F7; color: #101C2B' : 'padding: 0 16px 0 8px; background: #F2F3FA; color: #43474E'),
+      filterAria: isFiltered ? 'Filter, ' + filterCount + ' aktif' : 'Filter',
+      hasFilterCount: isFiltered,
+      filterCount: String(filterCount),
+      isFiltered: isFiltered, notFiltered: !isFiltered,
+      shownCount: String(filtered.length), totalCount: String(all.length),
+      clearFilters: () => this.setState({ fcats: {}, fstatus: 'all' }),
+      stripText: strip[0],
+      stripStyle: 'font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0.5px; padding: 4px 10px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.3); ' + strip[1],
+      showMock: dataStatus === 'mock',
+      risk: risk,
+      forecast: risk.rain.map((mm, i) => ({ t: (11 + i) + '.00', mm: String(mm), bar: 'width: 100%; border-radius: 4px 4px 0 0; background: #0061A4; height: ' + Math.max(2, Math.round(mm / 44 * 40)) + 'px' })),
+      nearby: byDist.slice(0, 3),
+      searchReports: byDist.slice(0, 2),
+      places: places,
+      place: place,
+      showDest: placeLike,
+      destStyle: 'position: absolute; left: ' + (place.x - 40) + 'px; top: ' + (place.y - 38) + 'px; width: 80px; display: flex; flex-direction: column; align-items: center',
+      vt: target || all[0],
+      showVerifyCard: showVerifyCard,
+      rep: rep, dup: dupRaw, tiles: tiles, sevs: sevs,
+      draftCats: draftCats, draftStatus: draftStatus,
+      applyDisabled: draftN === 0,
+      applyLabel: draftN === 0 ? 'Tidak ada laporan' : 'Tampilkan ' + draftN + ' laporan',
+      applyStyle: 'flex: none; height: 40px; border-radius: 20px; border: 0; font: inherit; font-weight: 500; letter-spacing: 0.1px; ' + (draftN === 0 ? 'background: rgba(25,28,32,.12); color: rgba(25,28,32,.38); cursor: not-allowed' : 'background: #0061A4; color: #FFFFFF; cursor: pointer'),
+      applyFilter: () => { const bb = this.b(); this.setState({ fcats: bb.dcats, fstatus: bb.dstatus, view: 'home', half: false, hist: [] }); },
+      resetDraft: () => this.setState({ dcats: {}, dstatus: 'all' }),
+      openFilter: () => { const bb = this.b(); this.setState(this.gp('filter', { dcats: Object.assign({}, bb.fcats), dstatus: bb.fstatus }, bb)); },
+      openSearch: () => { if (this.b().view !== 'search') this.go('search'); },
+      sentLabel: KS_CATS[b.lastCat].label.toLowerCase(),
+      reason: s.reason || 'melanjutkan',
+      routes: routes,
+      lineA: b.route === 'a' ? lineOn : lineOff,
+      lineB: b.route === 'b' ? lineOn : lineOff,
+      listItems: byDist,
+      alerts: alerts,
+      sheetStyle: 'position: absolute; left: 0; right: 0; bottom: 0; height: ' + h + 'px; background: #F2F3FA; border-radius: 28px 28px 0 0; box-shadow: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px 1px rgba(0,0,0,.15); display: flex; flex-direction: column',
+      handleLabel: b.half ? 'Perkecil panel' : 'Perbesar panel',
+      showControls: ctrlVisible,
+      ctrlStyle: 'position: absolute; right: 16px; bottom: ' + ctrlBottom + 'px; display: flex; flex-direction: column; align-items: flex-end; gap: 16px',
+      showLapor: view === 'home' && !b.half,
+      layersOpen: !!s.layersOpen,
+      layersStyle: 'position: absolute; right: 72px; bottom: ' + (ctrlBottom + 60) + 'px; width: 236px; background: #ECEEF4; border-radius: 4px; box-shadow: 0 2px 6px 2px rgba(0,0,0,.15), 0 1px 2px rgba(0,0,0,.3); padding: 8px 0; display: flex; flex-direction: column; box-sizing: border-box',
+      hasToast: !!s.toast,
+      toast: s.toast || '',
+      toastStyle: 'position: absolute; left: 16px; right: 16px; bottom: ' + (h + 88) + 'px; background: #2E3135; color: #EFF0F7; font-size: 14px; line-height: 20px; padding: 14px 16px; border-radius: 4px; box-shadow: 0 2px 6px 2px rgba(0,0,0,.15), 0 1px 2px rgba(0,0,0,.3)',
+      noop: () => {},
+      back: () => this.back(),
+      goHome: () => this.goHome(),
+      toggleHalf: () => { if (this.b().view === 'home') this.setState({ half: !this.b().half }); },
+      avatarTap: () => this.need({ type: 'alerts' }, 'melihat notifikasi'),
+      openRoute: () => this.go('route', { route: 'a' }),
+      watch: () => this.need({ type: 'watch' }, 'memantau area'),
+      lapor: () => this.go('quick'),
+      locate: () => this.toast('Peta dipusatkan ke lokasimu'),
+      toggleLayers: () => this.setState({ layersOpen: !(this.state && this.state.layersOpen) }),
+      toggleRisk: () => this.setState({ showRisk: (this.state && this.state.showRisk === false) }),
+      togglePins: () => this.setState({ showPins: (this.state && this.state.showPins === false) }),
+      share: () => this.toast('Membuka menu bagikan…'),
+      moveHint: () => this.toast('Geser peta untuk memindah titik laporan'),
+      addPhoto: () => this.toast('Membuka kamera…'),
+      startNav: () => this.toast('Membuka aplikasi navigasi…'),
+      dupSame: () => this.need({ type: 'vote', id: this.b().dupId, val: 'yes', then: 'report' }, 'ikut memastikan laporan'),
+      dupNew: () => this.need({ type: 'submit', cat: this.b().lastCat }, 'mengirim laporan'),
+      signIn: () => this.signIn()
+    };
+  }
+}
+</script>
+</body>
+</html>
