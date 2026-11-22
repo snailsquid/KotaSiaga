@@ -1,0 +1,3 @@
+self-hosted-runner:
+  # Runner on volta (Gitea act_runner; also the GitHub self-hosted runner volta-kotasiaga).
+  labels: [volta]

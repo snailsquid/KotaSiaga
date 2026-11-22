@@ -1,11 +1,19 @@
-# STB stack: microservice containers only (AGENTS.md section 2.6 and section 9).
-# Images are built by CI and pulled here; `build:` is for local use on a non-STB machine.
+# Deploy stack: microservice containers only (AGENTS.md section 2.6 and section 9).
+# Used as-is by Coolify on volta and by `docker compose` on an STB. Images are built by CI
+# and pulled here; there are no `build:` keys so the deploy host never compiles Rust.
+# Local build: docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+#
+# Images are linux/amd64 only for now (CI runs on Gitea on volta, no arm runner). An ARM host
+# (ARM STB) cannot run this stack until the arm64 leg returns with GitHub Actions.
+# `pull_policy: always` on the two services is what makes Coolify pick up a new `:latest`, but
+# it also makes `docker compose up` fail whenever GHCR is unreachable, even if the images are
+# already cached locally. On an offline host use `docker compose up --pull never`.
 name: kotasiaga
 
 services:
   core-service:
-    image: ${IMAGE_REGISTRY:-ghcr.io/OWNER}/kotasiaga-core:${IMAGE_TAG:-latest}
-    build: { context: ., args: { SERVICE: core-service } }
+    image: ${IMAGE_REGISTRY:-ghcr.io/snailsquid}/kotasiaga-core:${IMAGE_TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     env_file: .env
     environment:
@@ -16,8 +24,8 @@ services:
     cpus: 0.5
 
   identity-service:
-    image: ${IMAGE_REGISTRY:-ghcr.io/OWNER}/kotasiaga-identity:${IMAGE_TAG:-latest}
-    build: { context: ., args: { SERVICE: identity-service } }
+    image: ${IMAGE_REGISTRY:-ghcr.io/snailsquid}/kotasiaga-identity:${IMAGE_TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     env_file: .env
     environment:
@@ -32,13 +40,17 @@ services:
     restart: unless-stopped
     depends_on: [core-service, identity-service]
     volumes: ["./gateway/nginx.conf:/etc/nginx/nginx.conf:ro"]
-    # Local debugging only; the tunnel reaches the gateway over the compose network.
-    ports: ["127.0.0.1:8080:80"]
+    # Loopback only, for local checks (GATEWAY_PORT=18080 on volta, since 8080 is Traefik's).
+    # Public traffic: on volta, Coolify's Traefik (domain kotasiaga.arkk.dev); on an STB, the
+    # `tunnel` service. Both reach the gateway over the compose network.
+    ports: ["127.0.0.1:${GATEWAY_PORT:-8080}:80"]
     mem_limit: 64m
     cpus: 0.25
 
+  # Only with COMPOSE_PROFILES=tunnel (STB). volta routes through its wildcard tunnel and Traefik.
   tunnel:
     image: cloudflare/cloudflared:latest
+    profiles: [tunnel]
     restart: unless-stopped
     depends_on: [gateway]
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}

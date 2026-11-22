@@ -1,0 +1,7 @@
+# Local builds only, never on a deploy host (AGENTS.md section 9).
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+services:
+  core-service:
+    build: { context: ., args: { SERVICE: core-service } }
+  identity-service:
+    build: { context: ., args: { SERVICE: identity-service } }
