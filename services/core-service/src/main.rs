@@ -127,7 +127,7 @@ async fn main() {
     } else {
         5
     });
-    spawn_ticker(engine.clone(), tick);
+    let ticker = spawn_ticker(engine.clone(), tick);
     let (up, partners, routes) = adapters_for(&config);
     if !config.mock.enabled {
         adapters::feeds::spawn_live_inputs(engine.clone(), up.clone(), &config.upstreams);
@@ -154,7 +154,7 @@ async fn main() {
     let state = AppState {
         config: std::sync::Arc::new(config),
         db,
-        engine,
+        engine: engine.clone(),
         partners,
         routes,
     };
@@ -170,6 +170,14 @@ async fn main() {
     {
         fatal(1, &format!("server error: {e}"));
     }
+    // SIGTERM (every redeploy): stop producing changes, then wait until everything queued is in
+    // SQLite before the process exits.
+    ticker.abort();
+    match tokio::time::timeout(std::time::Duration::from_secs(10), engine.flush()).await {
+        Ok(Ok(())) => tracing::info!("pending writes flushed; shutting down"),
+        Ok(Err(e)) => tracing::error!(error = e, "flush on shutdown failed"),
+        Err(_) => tracing::error!("flush on shutdown timed out after 10 s"),
+    }
 }
 
 /// Logs a startup failure straight to stderr (not through tracing, so RUST_LOG cannot hide it)
@@ -180,7 +188,10 @@ fn fatal(code: i32, msg: &str) -> ! {
 }
 
 /// Drives time-based rules (expiry, decay) and, in mock mode, the generator.
-fn spawn_ticker(engine: std::sync::Arc<engine::Engine>, every: std::time::Duration) {
+fn spawn_ticker(
+    engine: std::sync::Arc<engine::Engine>,
+    every: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(every);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -191,7 +202,7 @@ fn spawn_ticker(engine: std::sync::Arc<engine::Engine>, every: std::time::Durati
             // The tick is CPU work; keep it off the request-serving threads.
             let _ = tokio::task::spawn_blocking(move || e.tick(chrono::Utc::now())).await;
         }
-    });
+    })
 }
 
 async fn shutdown_signal() {

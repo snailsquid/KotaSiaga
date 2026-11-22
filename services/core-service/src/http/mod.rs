@@ -782,6 +782,141 @@ mod tests {
         assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
+    async fn stored_report(st: &AppState, id: &str) -> Option<(String, i64)> {
+        sqlx::query_as("SELECT status, confirm_count FROM reports_reports WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&st.db)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn writes_are_committed_before_the_reply() {
+        let st = state(false).await;
+        let (s, b) = call(
+            &st,
+            "POST",
+            "/api/reports",
+            Some(json!({"category": "road_damage", "lat": -6.9, "lon": 107.6})),
+            Some(&token("usr_w1")),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED);
+        let id = b["data"]["id"].as_str().unwrap().to_string();
+        // No sleep: the 201 itself promises the row is in SQLite.
+        assert_eq!(stored_report(&st, &id).await, Some(("waiting".into(), 0)));
+        let (s, _) = call(
+            &st,
+            "POST",
+            &format!("/api/reports/{id}/votes"),
+            Some(json!({"vote": "confirm"})),
+            Some(&token("usr_w2")),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(stored_report(&st, &id).await, Some(("waiting".into(), 1)));
+    }
+
+    /// What main() does on SIGTERM: stop changing state, flush, exit. Nothing queued is lost.
+    #[tokio::test]
+    async fn shutdown_flush_keeps_queued_writes() {
+        let st = state(false).await;
+        let now = Utc::now();
+        let ids: Vec<String> = (0..50)
+            .map(|i| {
+                st.engine.update(now, |w| {
+                    w.create_report(
+                        crate::reports::NewReport {
+                            category: crate::reports::Category::Accident,
+                            lat: -6.9,
+                            lon: 107.6,
+                            description: Some(format!("antre {i}")),
+                            severity: 1,
+                            reporter: "usr_bulk".into(),
+                            origin: crate::reports::Origin::User,
+                        },
+                        now,
+                    )
+                    .unwrap()
+                    .id
+                })
+            })
+            .collect();
+        st.engine.flush().await.unwrap();
+        let loaded = crate::store::load(&st.db, Utc::now()).await.unwrap();
+        for id in &ids {
+            assert!(loaded.live.iter().any(|r| &r.id == id), "{id} lost");
+        }
+    }
+
+    #[tokio::test]
+    async fn mock_reset_keeps_user_reports() {
+        let st = state(true).await;
+        let (s, b) = call(
+            &st,
+            "POST",
+            "/api/reports",
+            Some(json!({"category": "flood", "lat": -6.9, "lon": 107.6})),
+            Some(&token("usr_keep")),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED);
+        let id = b["data"]["id"].as_str().unwrap().to_string();
+        let (s, _) = call(
+            &st,
+            "POST",
+            &format!("/api/reports/{id}/votes"),
+            Some(json!({"vote": "confirm"})),
+            Some(&token("usr_voter")),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        let t0 = Utc::now();
+        for i in 1..=10 {
+            st.engine.tick(t0 + Duration::seconds(5 * i));
+        }
+        // Mock users may have voted on it meanwhile; whatever is stored must survive the reset.
+        st.engine.flush().await.unwrap();
+        let before = stored_report(&st, &id).await;
+        assert!(before.is_some());
+        assert_eq!(scenario(&st, "reset").await, StatusCode::ACCEPTED);
+        st.engine.flush().await.unwrap();
+
+        let s2 = st.engine.snapshot();
+        assert!(
+            s2.reports.iter().any(|r| r.id == id),
+            "user report survives reset in memory"
+        );
+        assert!(
+            s2.reports
+                .iter()
+                .all(|r| r.origin == crate::reports::Origin::User),
+            "mock reports are gone"
+        );
+        assert_eq!(
+            stored_report(&st, &id).await,
+            before,
+            "and in SQLite, unchanged"
+        );
+        let votes: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM verification_votes WHERE report_id = ?")
+                .bind(&id)
+                .fetch_one(&st.db)
+                .await
+                .unwrap();
+        assert!(votes.0 >= 1, "its votes stay stored");
+        // Its ballot is kept too: the same user still cannot vote twice.
+        let (s, _) = call(
+            &st,
+            "POST",
+            &format!("/api/reports/{id}/votes"),
+            Some(json!({"vote": "confirm"})),
+            Some(&token("usr_voter")),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CONFLICT);
+    }
+
     /// Regression for the tick vs /_mock lock-order deadlock: ticks on one OS thread,
     /// /_mock/state and /_mock/scenario from several tasks at the same time, for a fixed
     /// wall time. Fails (does not hang) if they ever block each other.

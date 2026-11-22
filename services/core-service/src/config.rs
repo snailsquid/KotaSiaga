@@ -105,11 +105,27 @@ impl Config {
             if key.len() < 16 {
                 return Err(format!("API key for {name} must be at least 16 characters"));
             }
-            api_keys.insert(key.to_string(), name.to_string());
+            auth_token::reject_placeholder(&format!("API_KEYS entry {name}"), key)?;
+            if let Some(other) = api_keys.insert(key.to_string(), name.to_string()) {
+                return Err(format!(
+                    "API_KEYS: {other} and {name} share the same key; give every group its own key"
+                ));
+            }
         }
         let admin_api_key = get("ADMIN_API_KEY").filter(|k| !k.is_empty());
-        if admin_api_key.as_ref().is_some_and(|k| k.len() < 16) {
-            return Err("ADMIN_API_KEY must be at least 16 characters".into());
+        if let Some(k) = &admin_api_key {
+            if k.len() < 16 {
+                return Err("ADMIN_API_KEY must be at least 16 characters".into());
+            }
+            auth_token::reject_placeholder("ADMIN_API_KEY", k)?;
+            if let Some(name) = api_keys.get(k) {
+                return Err(format!(
+                    "ADMIN_API_KEY must differ from the API key of {name}"
+                ));
+            }
+        }
+        if let Some(s) = get("JWT_SECRET") {
+            auth_token::reject_placeholder("JWT_SECRET", &s)?;
         }
 
         let url = |k: &str, d: &str| {
@@ -238,6 +254,57 @@ mod tests {
             let err = cfg(&[("API_KEYS", &format!("{name}:dddddddddddddddd"))]).unwrap_err();
             assert!(err.contains("ADMIN_API_KEY"), "{name}: {err}");
         }
+    }
+
+    #[test]
+    fn rejects_duplicate_keys() {
+        let err = cfg(&[(
+            "API_KEYS",
+            "tourism:aaaaaaaaaaaaaaaa,health:aaaaaaaaaaaaaaaa",
+        )])
+        .unwrap_err();
+        assert!(err.contains("share the same key"), "{err}");
+        let err = cfg(&[
+            ("API_KEYS", "tourism:aaaaaaaaaaaaaaaa"),
+            ("ADMIN_API_KEY", "aaaaaaaaaaaaaaaa"),
+        ])
+        .unwrap_err();
+        assert!(err.contains("ADMIN_API_KEY"), "{err}");
+    }
+
+    #[test]
+    fn rejects_placeholder_secrets() {
+        let ok = "0123456789abcdef0123456789abcdef";
+        for (var, val) in [
+            ("JWT_SECRET", "CHANGE_ME_AT_LEAST_32_CHARACTERS_LONG"),
+            ("ADMIN_API_KEY", "CHANGE_ME_ADMIN_KEY"),
+            ("API_KEYS", "tourism:CHANGE_ME_16_CHARS_MIN"),
+        ] {
+            let err = cfg(&[(var, val)]).unwrap_err();
+            assert!(err.contains("placeholder"), "{var}: {err}");
+        }
+        assert!(cfg(&[("JWT_SECRET", ok)]).unwrap().jwt_secret.is_some());
+    }
+
+    /// Every secret in the shipped .env.example must be refused as-is.
+    #[test]
+    fn env_example_secrets_are_refused() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.env.example");
+        let text = std::fs::read_to_string(path).unwrap();
+        let mut checked = 0;
+        for line in text.lines().filter(|l| !l.trim_start().starts_with('#')) {
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
+            if ["JWT_SECRET", "ADMIN_API_KEY", "API_KEYS"].contains(&k) {
+                assert!(
+                    cfg(&[(k, v)]).is_err(),
+                    "{k} from .env.example was accepted"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 3);
     }
 
     #[test]

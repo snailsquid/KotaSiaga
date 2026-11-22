@@ -54,6 +54,7 @@ impl Config {
                 if password.len() < 8 {
                     return Err("TEST_ACCOUNT_PASSWORD must be at least 8 characters".into());
                 }
+                auth_token::reject_placeholder("TEST_ACCOUNT_PASSWORD", &password)?;
                 Some(TestAccount {
                     email: get("TEST_ACCOUNT_EMAIL")
                         .unwrap_or_else(|| DEFAULT_TEST_EMAIL.into())
@@ -64,6 +65,9 @@ impl Config {
                 })
             }
         };
+        if let Some(s) = get("JWT_SECRET") {
+            auth_token::reject_placeholder("JWT_SECRET", &s)?;
+        }
         Ok(Self {
             port,
             database_path: get("DATABASE_PATH").unwrap_or_else(|| "/data/identity.db".into()),
@@ -99,6 +103,24 @@ mod tests {
         );
         let long = "x".repeat(32);
         assert!(cfg(&[("JWT_SECRET", &long)]).unwrap().jwt_secret.is_some());
+    }
+
+    #[test]
+    fn placeholder_secrets_refuse_to_start() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.env.example");
+        let text = std::fs::read_to_string(path).unwrap();
+        let mut checked = 0;
+        for line in text.lines().filter(|l| !l.trim_start().starts_with('#')) {
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
+            if ["JWT_SECRET", "TEST_ACCOUNT_PASSWORD"].contains(&k) {
+                let err = cfg(&[(k, v)]).unwrap_err();
+                assert!(err.contains("placeholder"), "{k}: {err}");
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 2);
     }
 
     #[test]

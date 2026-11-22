@@ -496,15 +496,18 @@ impl World {
         }
     }
 
-    /// Drops reports, disasters and votes; keeps the change feed so `seq` never goes back.
+    /// Demo `reset`: drops mock-generated reports, their votes, mock users' reputation and all
+    /// disaster signals. Reports made by app users (stored in SQLite) and their ballots stay.
+    /// Keeps the change feed so `seq` never goes back. Nothing is deleted from the database.
     pub fn reset_inputs(&mut self, now: DateTime<Utc>) {
-        self.reports.clear();
-        self.archive.clear();
+        self.reports.retain(|r| r.origin == Origin::User);
+        self.archive.retain(|r| r.origin == Origin::User);
+        let kept: std::collections::HashSet<String> =
+            self.reports.iter().map(|r| r.id.clone()).collect();
+        self.verification.reset_mock(&kept);
         self.disasters.clear();
         self.resolved.clear();
-        self.verification.clear();
         self.stale.clear();
-        self.outbox.push(PersistOp::DeleteAllReports);
         self.last_transition_at = now;
     }
 
@@ -636,6 +639,18 @@ impl Engine {
         let snap = Arc::new(inner.snapshot(now));
         *self.snapshot.write().unwrap_or_else(|e| e.into_inner()) = snap;
         out
+    }
+
+    /// Waits until every change queued so far is committed to SQLite. `Ok` without a store.
+    pub async fn flush(&self) -> Result<(), String> {
+        let Some(tx) = self.persist.get() else {
+            return Ok(());
+        };
+        let (done, wait) = tokio::sync::oneshot::channel();
+        tx.send(PersistOp::Flush(done))
+            .map_err(|_| "persistence writer stopped".to_string())?;
+        wait.await
+            .map_err(|_| "persistence writer stopped".to_string())?
     }
 
     /// Reads the live world under the writer lock without publishing anything. Keep `f` tiny.

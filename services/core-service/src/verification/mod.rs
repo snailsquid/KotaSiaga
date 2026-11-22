@@ -148,9 +148,10 @@ impl Verification {
         self.ballots.remove(report_id);
     }
 
-    pub fn clear(&mut self) {
-        self.ballots.clear();
-        self.reputation.clear();
+    /// Mock reset: keeps ballots of `keep` reports and app users' (`usr_...`) reputation.
+    pub fn reset_mock(&mut self, keep: &HashSet<String>) {
+        self.ballots.retain(|id, _| keep.contains(id));
+        self.reputation.retain(|user, _| user.starts_with("usr_"));
     }
 }
 

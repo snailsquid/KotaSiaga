@@ -90,6 +90,8 @@ pub async fn create_report(
         }
         w.create_report(new, now).map_err(invalid)
     })?;
+    // Reply only once the report is in SQLite (a redeploy right after must not lose it).
+    st.engine.flush().await.map_err(ApiError::db)?;
     tracing::info!(report_id = report.id, user_id = user.id, category = ?report.category, "report created");
     Ok((
         StatusCode::CREATED,
@@ -135,6 +137,8 @@ pub async fn vote(
                 "Laporan sudah tidak menunggu verifikasi",
             ),
         })?;
+    // Reply only once the vote is in SQLite.
+    st.engine.flush().await.map_err(ApiError::db)?;
     tracing::info!(report_id = report.id, user_id = user.id, vote = vote.as_str(), status = ?report.status, "vote recorded");
     Ok(Json(Envelope {
         data: report,

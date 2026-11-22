@@ -12,7 +12,7 @@ use crate::risk::grid::CellId;
 use crate::rules::{ALERTS_KEPT_PER_USER, ARCHIVE_CAPACITY};
 use crate::verification::Vote;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PersistOp {
     UpsertReport(Report),
     Vote {
@@ -26,17 +26,24 @@ pub enum PersistOp {
         user_id: String,
         value: f64,
     },
-    /// `reset` demo scenario: drop every stored report and vote.
-    DeleteAllReports,
     Alert(Alert),
+    /// Barrier: answered once every op queued before it has been applied, with the first error
+    /// since the previous barrier. Handlers await it so a 200/201 means "committed".
+    Flush(tokio::sync::oneshot::Sender<Result<(), String>>),
 }
 
 pub fn spawn_writer(db: SqlitePool) -> mpsc::UnboundedSender<PersistOp> {
     let (tx, mut rx) = mpsc::unbounded_channel::<PersistOp>();
     tokio::spawn(async move {
+        let mut failed: Option<String> = None;
         while let Some(op) = rx.recv().await {
+            if let PersistOp::Flush(done) = op {
+                let _ = done.send(failed.take().map_or(Ok(()), Err));
+                continue;
+            }
             if let Err(e) = apply(&db, &op).await {
                 tracing::error!(error = %e, ?op, "persist failed");
+                failed.get_or_insert(e.to_string());
             }
         }
     });
@@ -107,14 +114,6 @@ pub async fn apply(db: &SqlitePool, op: &PersistOp) -> Result<(), sqlx::Error> {
             .execute(db)
             .await?;
         }
-        PersistOp::DeleteAllReports => {
-            sqlx::query("DELETE FROM verification_votes")
-                .execute(db)
-                .await?;
-            sqlx::query("DELETE FROM reports_reports")
-                .execute(db)
-                .await?;
-        }
         PersistOp::Alert(a) => {
             sqlx::query(
                 "INSERT INTO alerts_alerts (id, subscription_id, user_id, cell_id, risk_level, previous_level, at, message) \
@@ -141,6 +140,7 @@ pub async fn apply(db: &SqlitePool, op: &PersistOp) -> Result<(), sqlx::Error> {
             .execute(db)
             .await?;
         }
+        PersistOp::Flush(_) => {}
     }
     Ok(())
 }

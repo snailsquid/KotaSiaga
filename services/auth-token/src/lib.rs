@@ -15,6 +15,30 @@ pub const AUDIENCE: &str = "kotasiaga";
 /// Minimum `JWT_SECRET` length in bytes.
 pub const MIN_SECRET_LEN: usize = 32;
 
+/// True for values copied unchanged from `.env.example` or other obvious placeholders
+/// (`CHANGE_ME...`, `changeme`, `<your key>`). Services refuse to start with such a secret: they
+/// pass the length checks, and they are public in the repo.
+pub fn is_placeholder(value: &str) -> bool {
+    let v = value.trim().to_ascii_lowercase();
+    let squashed: String = v.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    squashed.contains("changeme")
+        || (v.starts_with('<') && v.ends_with('>'))
+        || ["password", "secret", "example", "placeholder", "xxxxxxxx"]
+            .iter()
+            .any(|p| squashed == *p || squashed.starts_with(&format!("your{p}")))
+}
+
+/// `Err` naming the variable when `value` is a placeholder.
+pub fn reject_placeholder(var: &str, value: &str) -> Result<(), String> {
+    if is_placeholder(value) {
+        Err(format!(
+            "{var} is still a placeholder from .env.example; set a real random value (e.g. openssl rand -hex 32)"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 const HEADER: &str = r#"{"alg":"HS256","typ":"JWT"}"#;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -115,6 +139,28 @@ mod tests {
             iat: 1000,
             exp,
         }
+    }
+
+    #[test]
+    fn placeholders_are_detected() {
+        for p in [
+            "CHANGE_ME_AT_LEAST_32_CHARACTERS_LONG",
+            "CHANGE_ME_ADMIN_KEY",
+            "change-me-please-0000",
+            "changeme",
+            "<your group key>",
+            "  CHANGE_ME_16_CHARS_MIN ",
+        ] {
+            assert!(is_placeholder(p), "{p}");
+        }
+        for real in ["3f9c2a7d1e5b8c4a6f0d2e9b7a1c3d5e", "pw-7f3a9c1e2b4d6f80"] {
+            assert!(!is_placeholder(real), "{real}");
+        }
+        assert!(
+            reject_placeholder("JWT_SECRET", "CHANGE_ME")
+                .unwrap_err()
+                .contains("JWT_SECRET")
+        );
     }
 
     #[test]
