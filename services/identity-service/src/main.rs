@@ -21,20 +21,32 @@ fn serde_json_ok() -> std::collections::BTreeMap<&'static str, &'static str> {
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_writer(std::io::stderr)
         .init();
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8081);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .unwrap_or_else(|e| fatal(&format!("cannot bind {addr}: {e}")));
     tracing::info!(%addr, "identity-service listening");
-    axum::serve(listener, router())
+    if let Err(e) = axum::serve(listener, router())
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await
-        .expect("server");
+    {
+        fatal(&format!("server error: {e}"));
+    }
+}
+
+/// Logs a startup failure straight to stderr (not through tracing, so RUST_LOG cannot hide it)
+/// and exits. The runtime image is distroless with no shell, so this line is the only clue.
+fn fatal(msg: &str) -> ! {
+    eprintln!("identity-service: fatal: {msg}");
+    std::process::exit(1);
 }
 
 #[cfg(test)]

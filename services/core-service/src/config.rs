@@ -35,7 +35,13 @@ pub struct MockConfig {
 
 impl Config {
     pub fn from_env() -> Result<Self, String> {
-        Self::from_lookup(|k| env::var(k).ok())
+        // Blank values count as unset: a deploy platform may write `KEY=` lines to `.env`.
+        Self::from_lookup(|k| {
+            env::var(k)
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
     }
 
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
