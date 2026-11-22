@@ -145,7 +145,12 @@ jobs:
             body=$(curl -sS --connect-timeout 10 --max-time 15 \
               -H "Authorization: Bearer $COOLIFY_TOKEN" \
               "${COOLIFY_URL%/}/api/v1/deployments/${DEPLOYMENT}" || true)
-            status=$(printf '%s' "$body" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
+            # Read the deployment's top-level "status": the body also nests application
+            # statuses (e.g. "running:unknown"), and its "logs" field holds raw control
+            # characters, so parse it as JSON with strict=False (jq rejects those).
+            status=$(printf '%s' "$body" | python3 -c 'import json,sys
+          try: print(json.loads(sys.stdin.read(), strict=False).get("status") or "")
+          except Exception: pass' || true)
             echo "deployment ${DEPLOYMENT}: ${status:-unknown}"
             case "$status" in
               finished) exit 0 ;;
