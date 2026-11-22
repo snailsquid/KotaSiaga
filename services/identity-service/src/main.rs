@@ -1,21 +1,15 @@
-//! KotaSiaga identity-service (Identitas & Akses): user JWT and per-group API keys.
-//! Runs in its own container with its own SQLite file.
+//! KotaSiaga identity-service (Identitas & Akses): app user accounts and JWT issuance.
+//! Runs in its own container with its own SQLite file. core-service verifies the tokens
+//! it issues with the same `JWT_SECRET`; group API keys (`X-API-Key`) live in core's config.
+
+mod config;
+mod http;
+mod password;
+mod store;
 
 use std::net::SocketAddr;
 
-use axum::{Json, Router, routing::get};
 use tracing_subscriber::EnvFilter;
-
-fn router() -> Router {
-    Router::new().nest(
-        "/api",
-        Router::new().route("/health", get(|| async { Json(serde_json_ok()) })),
-    )
-}
-
-fn serde_json_ok() -> std::collections::BTreeMap<&'static str, &'static str> {
-    [("status", "ok")].into_iter().collect()
-}
 
 #[tokio::main]
 async fn main() {
@@ -23,19 +17,38 @@ async fn main() {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .with_writer(std::io::stderr)
         .init();
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(8081);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    let config = config::Config::from_env()
+        .unwrap_or_else(|e| fatal(&format!("invalid configuration: {e}")));
+    if config.jwt_secret.is_none() {
+        tracing::error!(
+            "JWT_SECRET is not set (or shorter than {} bytes): register/login return 503 until it is",
+            auth_token::MIN_SECRET_LEN
+        );
+    }
+    let db = store::open(&config.database_path).await.unwrap_or_else(|e| {
+        fatal(&format!(
+            "cannot open database {}: {e} (does its directory exist and is it writable by this user?)",
+            config.database_path
+        ))
+    });
+    if let Some(acc) = &config.test_account {
+        match store::upsert_test_account(&db, acc).await {
+            Ok(id) => tracing::info!(email = acc.email, user_id = id, "test account ready"),
+            Err(e) => tracing::error!(error = %e, "could not seed the test account"),
+        }
+    } else {
+        tracing::warn!("TEST_ACCOUNT_PASSWORD not set: no test account seeded");
+    }
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
+    let app = http::router(http::AppState::new(config, db));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .unwrap_or_else(|e| fatal(&format!("cannot bind {addr}: {e}")));
     tracing::info!(%addr, "identity-service listening");
-    if let Err(e) = axum::serve(listener, router())
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+    if let Err(e) = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
         .await
     {
         fatal(&format!("server error: {e}"));
@@ -49,22 +62,18 @@ fn fatal(msg: &str) -> ! {
     std::process::exit(1);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::body::Body;
-    use axum::http::{Request, StatusCode};
-    use http_body_util::BodyExt;
-    use tower::ServiceExt;
-
-    #[tokio::test]
-    async fn health_is_ok() {
-        let res = router()
-            .oneshot(Request::get("/api/health").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        let bytes = res.into_body().collect().await.unwrap().to_bytes();
-        assert_eq!(&bytes[..], br#"{"status":"ok"}"#);
-    }
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let term = async {
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            s.recv().await;
+        }
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! { _ = ctrl_c => {}, _ = term => {} }
 }
