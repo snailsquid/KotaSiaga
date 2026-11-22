@@ -502,15 +502,11 @@ mod tests {
     fn flood_verified_scenario_raises_risk_at_point() {
         let (e, t0) = engine(5);
         let p = (-6.9, 107.6);
-        let g = e.mock.as_ref().unwrap();
-        e.update(t0, |w| {
-            g.lock().unwrap().scenario(w, "flood_verified", Some(p), t0)
-        })
-        .unwrap();
-        e.update(t0, |w| {
-            g.lock().unwrap().scenario(w, "flood_verified", Some(p), t0)
-        })
-        .unwrap();
+        for _ in 0..2 {
+            e.update_mock(t0, |g, w| g.scenario(w, "flood_verified", Some(p), t0))
+                .unwrap()
+                .unwrap();
+        }
         let s = e.snapshot();
         assert_eq!(
             s.risk.get(CellId::of(p.0, p.1).unwrap()).level,

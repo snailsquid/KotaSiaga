@@ -69,6 +69,11 @@ impl Config {
             let (name, key) = pair
                 .split_once(':')
                 .ok_or("API_KEYS entries must be name:key")?;
+            if name.trim().eq_ignore_ascii_case("admin") {
+                return Err(
+                    "API_KEYS must not use the name admin; set ADMIN_API_KEY instead".into(),
+                );
+            }
             if key.len() < 16 {
                 return Err(format!("API key for {name} must be at least 16 characters"));
             }
@@ -171,6 +176,14 @@ mod tests {
         assert_eq!(c.caller("nope"), None);
         assert!(cfg(&[("API_KEYS", "short:abc")]).is_err());
         assert!(cfg(&[("API_KEYS", "nokey")]).is_err());
+    }
+
+    #[test]
+    fn api_keys_cannot_claim_the_admin_name() {
+        for name in ["admin", "Admin", " ADMIN"] {
+            let err = cfg(&[("API_KEYS", &format!("{name}:dddddddddddddddd"))]).unwrap_err();
+            assert!(err.contains("ADMIN_API_KEY"), "{name}: {err}");
+        }
     }
 
     #[test]
