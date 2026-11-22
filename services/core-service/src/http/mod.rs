@@ -7,8 +7,10 @@ pub mod envelope;
 pub mod error;
 mod mock;
 mod params;
+mod routes;
+mod user;
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router, middleware};
 use serde_json::{Value, json};
 
@@ -23,7 +25,10 @@ pub fn router(state: AppState) -> Router {
         .route("/weather", get(city::weather))
         .route("/disasters", get(city::disasters))
         .route("/reports", get(city::reports))
-        .route("/changes", get(city::changes));
+        .route("/changes", get(city::changes))
+        .route("/routes/safe", post(routes::safe_route))
+        .route("/monitor-points", get(routes::monitor_points))
+        .route("/destination-points", get(routes::destination_points));
 
     let keyed = if state.engine.mock_enabled() {
         let admin = Router::new()
@@ -36,10 +41,28 @@ pub fn router(state: AppState) -> Router {
     };
     let keyed = keyed.route_layer(middleware::from_fn_with_state(
         state.clone(),
-        auth::require_api_key,
+        auth::require_key_or_user,
     ));
 
-    let api = Router::new().route("/health", get(health)).merge(keyed);
+    // `/reports` GET is keyed, POST is user-only: same path, two method routers merged.
+    let users = Router::new()
+        .route("/reports", post(user::create_report))
+        .route("/reports/{id}/votes", post(user::vote))
+        .route(
+            "/subscriptions",
+            get(user::list_subscriptions).post(user::create_subscription),
+        )
+        .route("/subscriptions/{id}", delete(user::delete_subscription))
+        .route("/alerts", get(user::list_alerts))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_user,
+        ));
+
+    let api = Router::new()
+        .route("/health", get(health))
+        .merge(keyed)
+        .merge(users);
     Router::new()
         .nest("/api", api)
         .fallback(|| async { ApiError::new(ErrorCode::NotFound, "Endpoint tidak ditemukan") })
@@ -62,6 +85,7 @@ mod tests {
 
     const KEY: &str = "tourism-test-key-0001";
     const ADMIN: &str = "admin-test-key-00001";
+    const SECRET: &str = "core-test-jwt-secret-0123456789abcdef";
 
     async fn state(mock: bool) -> AppState {
         let config = crate::config::Config::from_lookup(|k| match k {
@@ -69,15 +93,77 @@ mod tests {
             "MOCK_MODE" => Some(mock.to_string()),
             "API_KEYS" => Some(format!("tourism:{KEY}")),
             "ADMIN_API_KEY" => Some(ADMIN.into()),
+            "JWT_SECRET" => Some(SECRET.into()),
+            // Never reach the internet from tests.
+            "OSRM_URL" => Some("http://127.0.0.1:9".into()),
+            "UPSTREAM_TIMEOUT_MS" => Some("500".into()),
             _ => None,
         })
         .unwrap();
         let engine = std::sync::Arc::new(crate::engine::Engine::new(&config, Utc::now()));
+        let db = crate::db::open(":memory:").await.unwrap();
+        engine.attach_store(
+            crate::store::Loaded::default(),
+            crate::store::spawn_writer(db.clone()),
+            Utc::now(),
+        );
+        let (up, partners, routes) = crate::adapters_for(&config);
+        partners.refresh_tourism(&up, Utc::now()).await;
+        partners.refresh_health(&up, Utc::now()).await;
         AppState {
             config: std::sync::Arc::new(config),
-            db: crate::db::open(":memory:").await.unwrap(),
+            db,
             engine,
+            partners,
+            routes,
         }
+    }
+
+    fn token(user: &str) -> String {
+        let now = Utc::now().timestamp();
+        auth_token::sign(
+            &auth_token::Claims {
+                sub: user.into(),
+                name: "Uji".into(),
+                iss: auth_token::ISSUER.into(),
+                aud: auth_token::AUDIENCE.into(),
+                iat: now,
+                exp: now + 600,
+            },
+            SECRET.as_bytes(),
+        )
+    }
+
+    async fn call(
+        st: &AppState,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+        bearer: Option<&str>,
+    ) -> (StatusCode, Value) {
+        let mut b = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json");
+        if let Some(t) = bearer {
+            b = b.header("authorization", format!("Bearer {t}"));
+        }
+        let body = body.map_or_else(Body::empty, |v| Body::from(v.to_string()));
+        let res = router(st.clone())
+            .oneshot(b.body(body).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    /// Lets the write-behind task finish before reading the database.
+    async fn flush() {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
     async fn send(st: &AppState, req: Request<Body>) -> (StatusCode, Value) {
@@ -330,6 +416,370 @@ mod tests {
             std::sync::Arc::ptr_eq(&before, &st.engine.snapshot()),
             "GET /_mock/state must not publish a new snapshot"
         );
+    }
+
+    #[tokio::test]
+    async fn user_endpoints_need_a_valid_token() {
+        let st = state(true).await;
+        let body = json!({"category": "flood", "lat": -6.9, "lon": 107.6});
+        for bearer in [None, Some("garbage")] {
+            let (s, b) = call(&st, "POST", "/api/reports", Some(body.clone()), bearer).await;
+            assert_eq!(
+                (s, b["error"]["code"].as_str()),
+                (StatusCode::UNAUTHORIZED, Some("invalid_token"))
+            );
+        }
+        // A group key is not a user.
+        let req = Request::post("/api/reports")
+            .header("x-api-key", KEY)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        assert_eq!(send(&st, req).await.0, StatusCode::UNAUTHORIZED);
+        let (s, _) = call(&st, "GET", "/api/alerts", None, None).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn read_endpoints_accept_a_user_token_too() {
+        let st = state(true).await;
+        let t = token("usr_reader");
+        let (s, b) = call(&st, "GET", "/api/risk?lat=-6.9&lon=107.6", None, Some(&t)).await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(b["data"]["cell_id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn create_report_vote_and_persist() {
+        let st = state(false).await;
+        let alice = token("usr_alice");
+        let (s, b) = call(
+            &st,
+            "POST",
+            "/api/reports",
+            Some(json!({"category": "flood", "lat": -6.9, "lon": 107.6, "description": "Air setinggi lutut\u{0007}", "severity": 3})),
+            Some(&alice),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED, "{b}");
+        assert_eq!(b["data"]["status"], "waiting");
+        assert_eq!(b["data"]["description"], "Air setinggi lutut");
+        let id = b["data"]["id"].as_str().unwrap().to_string();
+
+        let (s, b) = call(
+            &st,
+            "POST",
+            "/api/reports",
+            Some(json!({"category": "flood", "lat": -6.2, "lon": 106.8})),
+            Some(&alice),
+        )
+        .await;
+        assert_eq!(
+            (s, b["error"]["code"].as_str()),
+            (StatusCode::UNPROCESSABLE_ENTITY, Some("validation_error"))
+        );
+        let (s, _) = call(
+            &st,
+            "POST",
+            "/api/reports",
+            Some(json!({"category": "tsunami", "lat": -6.9, "lon": 107.6})),
+            Some(&alice),
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+
+        let uri = format!("/api/reports/{id}/votes");
+        let (s, b) = call(
+            &st,
+            "POST",
+            &uri,
+            Some(json!({"vote": "confirm"})),
+            Some(&alice),
+        )
+        .await;
+        assert_eq!(
+            (s, b["error"]["code"].as_str()),
+            (StatusCode::FORBIDDEN, Some("forbidden")),
+            "own report"
+        );
+        let (s, _) = call(
+            &st,
+            "POST",
+            &uri,
+            Some(json!({"vote": "maybe"})),
+            Some(&token("usr_bob")),
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+
+        // Six fresh users at the default reputation 0.5 reach the 3.0 threshold.
+        for i in 0..6 {
+            let (s, b) = call(
+                &st,
+                "POST",
+                &uri,
+                Some(json!({"vote": "confirm"})),
+                Some(&token(&format!("usr_v{i}"))),
+            )
+            .await;
+            assert_eq!(s, StatusCode::OK, "{b}");
+            let want = if i == 5 { "verified" } else { "waiting" };
+            assert_eq!(b["data"]["status"], want);
+            assert_eq!(b["data"]["confirm_count"], i + 1);
+        }
+        let (s, b) = call(
+            &st,
+            "POST",
+            &uri,
+            Some(json!({"vote": "confirm"})),
+            Some(&token("usr_v0")),
+        )
+        .await;
+        assert_eq!(
+            (s, b["error"]["code"].as_str()),
+            (StatusCode::CONFLICT, Some("conflict"))
+        );
+        let (s, _) = call(
+            &st,
+            "POST",
+            "/api/reports/rpt_999/votes",
+            Some(json!({"vote": "confirm"})),
+            Some(&token("usr_v0")),
+        )
+        .await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+
+        flush().await;
+        let (status, votes): (String, i64) = sqlx::query_as(
+            "SELECT r.status, (SELECT COUNT(*) FROM verification_votes WHERE report_id = r.id) FROM reports_reports r WHERE r.id = ?",
+        )
+        .bind(&id)
+        .fetch_one(&st.db)
+        .await
+        .unwrap();
+        assert_eq!((status.as_str(), votes), ("verified", 6));
+        let rep: (f64,) = sqlx::query_as(
+            "SELECT reputation FROM verification_reputation WHERE user_id = 'usr_alice'",
+        )
+        .fetch_one(&st.db)
+        .await
+        .unwrap();
+        assert!(
+            rep.0 > crate::rules::REPUTATION_DEFAULT,
+            "reporter gains reputation"
+        );
+
+        // A restart rebuilds the same report from SQLite.
+        let loaded = crate::store::load(&st.db, Utc::now()).await.unwrap();
+        assert_eq!(loaded.live.len(), 1);
+        assert_eq!(loaded.live[0].id, id);
+        assert_eq!(
+            loaded.max_report_seq,
+            id.trim_start_matches("rpt_").parse::<u64>().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn report_rate_limit_per_user() {
+        let st = state(false).await;
+        let t = token("usr_spam");
+        for _ in 0..crate::rules::MAX_REPORTS_PER_USER_PER_HOUR {
+            let (s, _) = call(
+                &st,
+                "POST",
+                "/api/reports",
+                Some(json!({"category": "accident", "lat": -6.9, "lon": 107.6})),
+                Some(&t),
+            )
+            .await;
+            assert_eq!(s, StatusCode::CREATED);
+        }
+        let (s, b) = call(
+            &st,
+            "POST",
+            "/api/reports",
+            Some(json!({"category": "accident", "lat": -6.9, "lon": 107.6})),
+            Some(&t),
+        )
+        .await;
+        assert_eq!(
+            (s, b["error"]["code"].as_str()),
+            (StatusCode::TOO_MANY_REQUESTS, Some("rate_limited"))
+        );
+    }
+
+    #[tokio::test]
+    async fn subscriptions_and_alerts() {
+        let st = state(true).await;
+        let t = token("usr_sub");
+        let (s, b) = call(
+            &st,
+            "POST",
+            "/api/subscriptions",
+            Some(json!({"name": "Rumah", "lat": -6.9, "lon": 107.6, "radius_m": 800})),
+            Some(&t),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED, "{b}");
+        let sub_id = b["data"]["id"].as_str().unwrap().to_string();
+        assert!(b["data"]["risk_level"].is_string());
+        let (s, _) = call(
+            &st,
+            "POST",
+            "/api/subscriptions",
+            Some(json!({"name": "", "lat": -6.9, "lon": 107.6})),
+            Some(&t),
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+        let (s, _) = call(
+            &st,
+            "POST",
+            "/api/subscriptions",
+            Some(json!({"name": "Jauh", "lat": -6.9, "lon": 107.6, "radius_m": 9000})),
+            Some(&t),
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+
+        let (_, b) = call(&st, "GET", "/api/subscriptions", None, Some(&t)).await;
+        assert_eq!(b["data"].as_array().unwrap().len(), 1);
+        let (_, other) = call(
+            &st,
+            "GET",
+            "/api/subscriptions",
+            None,
+            Some(&token("usr_other")),
+        )
+        .await;
+        assert_eq!(other["data"], json!([]), "users only see their own");
+
+        // Two verified severe floods at the point push the area to danger -> one alert.
+        for _ in 0..2 {
+            let req = Request::post("/api/_mock/scenario")
+                .header("x-api-key", ADMIN)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"flood_verified","lat":-6.9,"lon":107.6}"#,
+                ))
+                .unwrap();
+            assert_eq!(send(&st, req).await.0, StatusCode::ACCEPTED);
+        }
+        flush().await;
+        let (s, b) = call(&st, "GET", "/api/alerts", None, Some(&t)).await;
+        assert_eq!(s, StatusCode::OK);
+        let alerts = b["data"].as_array().unwrap();
+        assert!(!alerts.is_empty(), "risk rose inside the subscribed area");
+        assert_eq!(alerts[0]["subscription_id"], sub_id.as_str());
+        assert_eq!(alerts[0]["risk_level"], "danger");
+        assert!(alerts[0]["message"].as_str().unwrap().starts_with("Rumah"));
+        let (_, none) = call(&st, "GET", "/api/alerts", None, Some(&token("usr_other"))).await;
+        assert_eq!(none["data"], json!([]));
+
+        let (s, _) = call(
+            &st,
+            "DELETE",
+            &format!("/api/subscriptions/{sub_id}"),
+            None,
+            Some(&token("usr_other")),
+        )
+        .await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "cannot delete someone else's");
+        let (s, _) = call(
+            &st,
+            "DELETE",
+            &format!("/api/subscriptions/{sub_id}"),
+            None,
+            Some(&t),
+        )
+        .await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        let (_, b) = call(&st, "GET", "/api/alerts", None, Some(&t)).await;
+        assert_eq!(b["data"], json!([]), "alerts go with their subscription");
+    }
+
+    #[tokio::test]
+    async fn safe_route_in_mock_mode() {
+        let st = state(true).await;
+        let req = Request::post("/api/routes/safe")
+            .header("x-api-key", KEY)
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"origin":{"lat":-6.90,"lon":107.60},"destination":{"lat":-6.91,"lon":107.62},"alternatives":3}"#))
+            .unwrap();
+        let (s, b) = send(&st, req).await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+        let routes = b["data"]["routes"].as_array().unwrap();
+        assert_eq!(routes.len(), 3);
+        assert_eq!(b["data"]["recommended_id"], routes[0]["id"]);
+        assert_eq!(routes[0]["geometry"]["type"], "LineString");
+        assert!(!routes[0]["reasons"].as_array().unwrap().is_empty());
+
+        // By destination point id (a Health donation event).
+        let (_, pts) = get(&st, "/api/destination-points").await;
+        let dest = pts["data"][0]["id"].as_str().unwrap().to_string();
+        let req = Request::post("/api/routes/safe")
+            .header("x-api-key", KEY)
+            .header("content-type", "application/json")
+            .body(Body::from(format!(
+                r#"{{"origin":{{"lat":-6.90,"lon":107.60}},"destination_id":"{dest}"}}"#
+            )))
+            .unwrap();
+        assert_eq!(send(&st, req).await.0, StatusCode::OK);
+
+        for bad in [
+            r#"{"origin":{"lat":-6.2,"lon":106.8},"destination":{"lat":-6.91,"lon":107.62}}"#,
+            r#"{"origin":{"lat":-6.90,"lon":107.60}}"#,
+            r#"{"origin":{"lat":-6.90,"lon":107.60},"destination":{"lat":-6.91,"lon":107.62},"alternatives":7}"#,
+        ] {
+            let req = Request::post("/api/routes/safe")
+                .header("x-api-key", KEY)
+                .header("content-type", "application/json")
+                .body(Body::from(bad))
+                .unwrap();
+            assert_eq!(
+                send(&st, req).await.0,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{bad}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn live_route_without_osrm_is_a_clear_503() {
+        let st = state(false).await; // OSRM_URL points at a closed port
+        let req = Request::post("/api/routes/safe")
+            .header("x-api-key", KEY)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"origin":{"lat":-6.90,"lon":107.60},"destination":{"lat":-6.91,"lon":107.62}}"#,
+            ))
+            .unwrap();
+        let res = router(st.clone()).oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(res.headers().contains_key("retry-after"));
+    }
+
+    #[tokio::test]
+    async fn partner_points_carry_risk() {
+        let st = state(true).await;
+        let (s, b) = get(&st, "/api/monitor-points").await;
+        assert_eq!(s, StatusCode::OK);
+        let pts = b["data"].as_array().unwrap();
+        assert_eq!(pts.len(), 11);
+        assert!(pts[0]["risk_level"].is_string());
+        assert!(pts[0]["cell_id"].as_str().unwrap().starts_with("c_"));
+        assert_eq!(b["meta"]["source"], "mock");
+        let (s, b) = get(&st, "/api/destination-points?risk_level=safe").await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(
+            b["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|p| p["risk_level"] == "safe")
+        );
+        let (s, _) = get(&st, "/api/monitor-points?risk_level=meh").await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     /// Regression for the tick vs /_mock lock-order deadlock: ticks on one OS thread,

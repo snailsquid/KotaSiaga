@@ -1,20 +1,22 @@
 //! Wires the bounded contexts together through domain events, and publishes an immutable
 //! snapshot for readers. One writer (the `World` mutex); readers only clone an `Arc`.
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, RwLock};
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use chrono::{DateTime, Duration, Utc};
 
+use crate::alerts::{Subscription, Watch};
 use crate::config::Config;
 use crate::feed::{Change, ChangeFeed, ChangeType};
 use crate::http::envelope::Source;
 use crate::mock::{Generator, MockState};
-use crate::reports::{Category, NewReport, Report, ReportStatus};
+use crate::reports::{Category, NewReport, Origin, Report, ReportStatus};
 use crate::risk::RiskGrid;
 use crate::risk::grid::CellId;
 use crate::risk::inputs::{DisasterKind, DisasterSignal, DisasterStatus, WeatherState};
 use crate::rules::*;
+use crate::store::{Loaded, PersistOp};
 use crate::verification::{Verification, Vote, VoteError, VoteOutcome};
 
 /// Domain events, named as in the DDD paper. Each becomes one change-feed entry.
@@ -64,7 +66,12 @@ pub struct World {
     feed: ChangeFeed,
     next_report: u64,
     next_disaster: u64,
-    stale: Option<(String, DateTime<Utc>)>,
+    /// Upstreams currently down -> until when to report `meta.stale`.
+    stale: BTreeMap<String, DateTime<Utc>>,
+    /// Subscribed areas, checked after every risk recompute.
+    watches: Vec<Watch>,
+    /// Changes to store, drained by the engine after each write.
+    outbox: Vec<PersistOp>,
     last_transition_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -84,7 +91,9 @@ impl World {
             feed: ChangeFeed::default(),
             next_report: 0,
             next_disaster: 0,
-            stale: None,
+            stale: BTreeMap::new(),
+            watches: Vec::new(),
+            outbox: Vec::new(),
             last_transition_at: now,
             updated_at: now,
         }
@@ -181,8 +190,10 @@ impl World {
             expires_at: now + Duration::seconds(self.expiry_s(new.category)),
             reporter: new.reporter,
             cell,
+            origin: new.origin,
         };
         self.reports.push(r.clone());
+        self.persist_report(&r);
         self.emit(
             DomainEvent::LaporanDibuat {
                 id: r.id.clone(),
@@ -195,6 +206,32 @@ impl World {
 
     pub fn live_reports(&self) -> impl Iterator<Item = &Report> {
         self.reports.iter()
+    }
+
+    fn persist_report(&mut self, r: &Report) {
+        if r.origin == Origin::User {
+            self.outbox.push(PersistOp::UpsertReport(r.clone()));
+        }
+    }
+
+    fn persist_reputation(&mut self, user: &str) {
+        // Mock users (`user_01`..) are reseeded on start; only app users (`usr_...`) are stored.
+        if user.starts_with("usr_") {
+            self.outbox.push(PersistOp::Reputation {
+                user_id: user.to_string(),
+                value: self.verification.reputation(user),
+            });
+        }
+    }
+
+    /// Reports `user` created in the last hour (live or archived), for the per-user rate limit.
+    pub fn recent_reports_by(&self, user: &str, now: DateTime<Utc>) -> usize {
+        let since = now - Duration::hours(1);
+        self.reports
+            .iter()
+            .chain(self.archive.iter())
+            .filter(|r| r.reporter == user && r.created_at >= since)
+            .count()
     }
 
     // ---- Verifikasi & Reputasi ----
@@ -211,10 +248,24 @@ impl World {
             .iter()
             .position(|r| r.id == report_id)
             .ok_or(VoteError::NotFound)?;
+        let weight = self.verification.reputation(user);
         let outcome = self
             .verification
             .vote(&mut self.reports[i], user, vote, now)?;
         let r = self.reports[i].clone();
+        if r.origin == Origin::User {
+            self.outbox.push(PersistOp::Vote {
+                report_id: r.id.clone(),
+                user_id: user.to_string(),
+                vote,
+                weight,
+                at: now,
+            });
+            self.persist_report(&r);
+        }
+        if outcome != VoteOutcome::Counted {
+            self.persist_reputation(&r.reporter);
+        }
         match outcome {
             VoteOutcome::Counted => {}
             VoteOutcome::Verified => self.emit(
@@ -255,6 +306,7 @@ impl World {
         for mut r in due {
             r.status = ReportStatus::Expired;
             self.verification.forget(&r.id);
+            self.persist_report(&r);
             let ev = DomainEvent::LaporanKedaluwarsa {
                 id: r.id.clone(),
                 category: r.category,
@@ -333,15 +385,115 @@ impl World {
         }
     }
 
+    /// Mock faults: `Some` marks one upstream down until a time, `None` clears every fault.
     pub fn set_stale(&mut self, upstream: Option<(String, DateTime<Utc>)>) {
-        self.stale = upstream;
+        match upstream {
+            Some((u, until)) => {
+                self.stale.insert(u, until);
+            }
+            None => self.stale.clear(),
+        }
+    }
+
+    /// Adapters: mark an upstream down (until `until`) or back up (`None`).
+    pub fn mark_upstream(&mut self, upstream: &str, until: Option<DateTime<Utc>>) {
+        match until {
+            Some(t) => {
+                self.stale.insert(upstream.to_string(), t);
+            }
+            None => {
+                self.stale.remove(upstream);
+            }
+        }
+    }
+
+    pub fn stale_upstreams(&self, now: DateTime<Utc>) -> Vec<String> {
+        self.stale
+            .iter()
+            .filter(|(_, until)| **until > now)
+            .map(|(u, _)| u.clone())
+            .collect()
     }
 
     pub fn stale_upstream(&self, now: DateTime<Utc>) -> Option<&str> {
         self.stale
-            .as_ref()
-            .filter(|(_, until)| *until > now)
+            .iter()
+            .find(|(_, until)| **until > now)
             .map(|(u, _)| u.as_str())
+    }
+
+    /// Replaces the external disaster signals (PetaBencana) with the latest window: new ids are
+    /// created, ids missing from the window are resolved. Signals keep their upstream ids.
+    pub fn sync_external_disasters(&mut self, latest: Vec<DisasterSignal>, now: DateTime<Utc>) {
+        let ids: std::collections::HashSet<&str> = latest.iter().map(|d| d.id.as_str()).collect();
+        let gone: Vec<String> = self
+            .disasters
+            .iter()
+            .filter(|d| !ids.contains(d.id.as_str()))
+            .map(|d| d.id.clone())
+            .collect();
+        for id in gone {
+            self.resolve_disaster(&id, now);
+        }
+        for d in latest {
+            if self.disasters.iter().any(|x| x.id == d.id) {
+                continue;
+            }
+            let ev = DomainEvent::SinyalBencanaMuncul {
+                id: d.id.clone(),
+                kind: d.kind,
+            };
+            self.disasters.push(d);
+            self.emit(ev, now);
+        }
+    }
+
+    // ---- Peringatan: subscriptions ----
+
+    pub fn add_subscription(&mut self, sub: Subscription) {
+        self.watches.push(Watch::new(sub, &self.risk));
+    }
+
+    pub fn remove_subscription(&mut self, id: &str) {
+        self.watches.retain(|w| w.sub.id != id);
+    }
+
+    /// Current worst risk level inside a subscribed area.
+    pub fn subscription_level(&self, id: &str) -> Option<crate::risk::RiskLevel> {
+        self.watches
+            .iter()
+            .find(|w| w.sub.id == id)
+            .map(|w| w.level)
+    }
+
+    fn check_watches(&mut self, now: DateTime<Utc>) {
+        for w in &mut self.watches {
+            if let Some(a) = w.check(&self.risk, now) {
+                self.outbox.push(PersistOp::Alert(a));
+            }
+        }
+    }
+
+    pub fn take_outbox(&mut self) -> Vec<PersistOp> {
+        std::mem::take(&mut self.outbox)
+    }
+
+    /// Rebuilds the stored, user-made part of the world at startup.
+    pub fn restore(&mut self, data: Loaded) {
+        self.next_report = self.next_report.max(data.max_report_seq);
+        for (user, rep) in data.reputation {
+            self.verification.set_reputation(&user, rep);
+        }
+        for (report, user, vote, weight) in data.votes {
+            self.verification.restore_vote(&report, &user, vote, weight);
+        }
+        self.reports.extend(data.live);
+        for r in data.archive.into_iter().rev() {
+            self.archive_report(r);
+        }
+        for sub in data.subscriptions {
+            self.add_subscription(sub);
+        }
     }
 
     /// Drops reports, disasters and votes; keeps the change feed so `seq` never goes back.
@@ -351,7 +503,8 @@ impl World {
         self.disasters.clear();
         self.resolved.clear();
         self.verification.clear();
-        self.stale = None;
+        self.stale.clear();
+        self.outbox.push(PersistOp::DeleteAllReports);
         self.last_transition_at = now;
     }
 
@@ -363,6 +516,7 @@ impl World {
             self.emit(DomainEvent::TingkatRisikoBerubah { cell, from, to }, now);
         }
         self.risk = next;
+        self.check_watches(now);
     }
 
     /// Applies time-driven rules after any change: expiry, then risk.
@@ -419,6 +573,8 @@ pub struct Engine {
     inner: Mutex<Inner>,
     snapshot: RwLock<Arc<Snapshot>>,
     mock_enabled: bool,
+    /// Where stored changes go (the SQLite writer task). Unset in most unit tests.
+    persist: OnceLock<tokio::sync::mpsc::UnboundedSender<PersistOp>>,
 }
 
 impl Engine {
@@ -438,7 +594,22 @@ impl Engine {
             inner: Mutex::new(inner),
             snapshot: RwLock::new(snap),
             mock_enabled: mock_cfg.is_some(),
+            persist: OnceLock::new(),
         }
+    }
+
+    /// Loads stored data into the world and starts sending changes to `tx`.
+    pub fn attach_store(
+        &self,
+        loaded: Loaded,
+        tx: tokio::sync::mpsc::UnboundedSender<PersistOp>,
+        now: DateTime<Utc>,
+    ) {
+        let _ = self.persist.set(tx);
+        self.write(now, |i| {
+            i.world.restore(loaded);
+            // Expiry while we were down is stored when settle runs; nothing else to send.
+        });
     }
 
     pub fn mock_enabled(&self) -> bool {
@@ -456,13 +627,24 @@ impl Engine {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let out = f(&mut inner);
         inner.world.settle(now);
+        let ops = inner.world.take_outbox();
+        if let Some(tx) = self.persist.get() {
+            for op in ops {
+                let _ = tx.send(op);
+            }
+        }
         let snap = Arc::new(inner.snapshot(now));
         *self.snapshot.write().unwrap_or_else(|e| e.into_inner()) = snap;
         out
     }
 
+    /// Reads the live world under the writer lock without publishing anything. Keep `f` tiny.
+    pub fn with_world<R>(&self, f: impl FnOnce(&World) -> R) -> R {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        f(&inner.world)
+    }
+
     /// Runs `f` as the single writer, settles time-driven rules and publishes a new snapshot.
-    #[allow(dead_code)] // used by the write endpoints (reports, votes) once they land
     pub fn update<R>(&self, now: DateTime<Utc>, f: impl FnOnce(&mut World) -> R) -> R {
         self.write(now, |i| f(&mut i.world))
     }

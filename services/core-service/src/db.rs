@@ -22,10 +22,13 @@ pub async fn open(path: &str) -> Result<SqlitePool, sqlx::Error> {
         .foreign_keys(true)
         .busy_timeout(Duration::from_secs(5));
     // Small pool: reads are served from memory, the database mostly takes writes.
-    SqlitePoolOptions::new()
-        .max_connections(4)
+    // An in-memory database exists per connection, so tests use exactly one.
+    let pool = SqlitePoolOptions::new()
+        .max_connections(if path == ":memory:" { 1 } else { 4 })
         .connect_with(opts)
-        .await
+        .await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
+    Ok(pool)
 }
 
 #[cfg(test)]

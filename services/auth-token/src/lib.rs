@@ -67,7 +67,8 @@ pub fn sign(claims: &Claims, secret: &[u8]) -> String {
 /// Verifies signature, issuer, audience and expiry (`now` in Unix seconds, 30 s leeway).
 pub fn verify(token: &str, secret: &[u8], now: i64) -> Result<Claims, TokenError> {
     let mut parts = token.split('.');
-    let (Some(h), Some(p), Some(s), None) = (parts.next(), parts.next(), parts.next(), parts.next())
+    let (Some(h), Some(p), Some(s), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
     else {
         return Err(TokenError::Malformed);
     };
@@ -135,7 +136,10 @@ mod tests {
         let forged_payload = B64.encode(serde_json::to_vec(&evil).unwrap());
         let parts: Vec<&str> = t.split('.').collect();
         let tampered = format!("{}.{}.{}", parts[0], forged_payload, parts[2]);
-        assert_eq!(verify(&tampered, SECRET, 1500), Err(TokenError::BadSignature));
+        assert_eq!(
+            verify(&tampered, SECRET, 1500),
+            Err(TokenError::BadSignature)
+        );
     }
 
     #[test]
@@ -152,6 +156,9 @@ mod tests {
         let mut c = claims(2000);
         c.aud = "someone-else".into();
         let t = sign(&c, SECRET);
-        assert_eq!(verify(&t, SECRET, 1500), Err(TokenError::WrongIssuerOrAudience));
+        assert_eq!(
+            verify(&t, SECRET, 1500),
+            Err(TokenError::WrongIssuerOrAudience)
+        );
     }
 }

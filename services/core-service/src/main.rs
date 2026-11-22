@@ -6,6 +6,7 @@
 //! - Hot read data lives in memory and is recomputed on domain events, never per request.
 
 mod adapters;
+mod alerts;
 mod config;
 mod db;
 mod engine;
@@ -16,6 +17,7 @@ mod reports;
 mod risk;
 mod routing;
 mod rules;
+mod store;
 mod verification;
 
 use std::net::SocketAddr;
@@ -25,9 +27,44 @@ use tracing_subscriber::EnvFilter;
 #[derive(Clone)]
 pub struct AppState {
     pub config: std::sync::Arc<config::Config>,
-    #[allow(dead_code)] // used by the write endpoints (reports, votes, subscriptions)
     pub db: sqlx::SqlitePool,
     pub engine: std::sync::Arc<engine::Engine>,
+    pub partners: std::sync::Arc<adapters::partners::Partners>,
+    pub routes: std::sync::Arc<adapters::osrm::RouteSource>,
+}
+
+/// Builds the adapters from config (no network calls here).
+pub fn adapters_for(
+    config: &config::Config,
+) -> (
+    adapters::http::Upstream,
+    std::sync::Arc<adapters::partners::Partners>,
+    std::sync::Arc<adapters::osrm::RouteSource>,
+) {
+    use adapters::partners::{Partner, Partners};
+    let u = &config.upstreams;
+    let up = adapters::http::Upstream::new(u.timeout_ms);
+    let partners = Partners::new(
+        Partner {
+            base_url: u.tourism_base_url.clone(),
+            path: "/feed/destinations".into(),
+            api_key: u.tourism_api_key.clone(),
+            mock: config.mock.upstream_tourism || u.tourism_base_url.is_none(),
+        },
+        Partner {
+            base_url: u.health_base_url.clone(),
+            path: u.health_events_path.clone(),
+            api_key: u.health_api_key.clone(),
+            mock: config.mock.upstream_health || u.health_base_url.is_none(),
+        },
+    );
+    let live_osrm = !config.mock.enabled || u.osrm_in_mock;
+    let routes = adapters::osrm::RouteSource::new(up.clone(), u.osrm_url.clone(), live_osrm);
+    (
+        up,
+        std::sync::Arc::new(partners),
+        std::sync::Arc::new(routes),
+    )
 }
 
 #[tokio::main]
@@ -64,16 +101,55 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     let engine = std::sync::Arc::new(engine::Engine::new(&config, chrono::Utc::now()));
+    let loaded = store::load(&db, chrono::Utc::now())
+        .await
+        .unwrap_or_else(|e| fatal(1, &format!("cannot read stored data: {e}")));
+    tracing::info!(
+        live_reports = loaded.live.len(),
+        subscriptions = loaded.subscriptions.len(),
+        "stored data loaded"
+    );
+    engine.attach_store(loaded, store::spawn_writer(db.clone()), chrono::Utc::now());
+    if config.jwt_secret.is_none() {
+        tracing::warn!(
+            "JWT_SECRET not set (or shorter than 32 bytes): every user endpoint returns 401"
+        );
+    }
     let tick = std::time::Duration::from_secs(if config.mock.enabled {
         config.mock.tick_seconds
     } else {
         5
     });
     spawn_ticker(engine.clone(), tick);
+    let (up, partners, routes) = adapters_for(&config);
+    if !config.mock.enabled {
+        adapters::feeds::spawn_live_inputs(engine.clone(), up.clone(), &config.upstreams);
+    }
+    adapters::feeds::spawn_partner_feeds(partners.clone(), up, &config.upstreams);
+    tracing::info!(
+        tourism = if partners.tourism_cfg.mock {
+            "mock"
+        } else {
+            "live"
+        },
+        health = if partners.health_cfg.mock {
+            "mock"
+        } else {
+            "live"
+        },
+        osrm = if !config.mock.enabled || config.upstreams.osrm_in_mock {
+            "live"
+        } else {
+            "mock"
+        },
+        "upstream adapters ready"
+    );
     let state = AppState {
         config: std::sync::Arc::new(config),
         db,
         engine,
+        partners,
+        routes,
     };
     let app = http::router(state);
 

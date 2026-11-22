@@ -12,6 +12,28 @@ pub struct Config {
     pub api_keys: HashMap<String, String>,
     /// Key for `/_mock/*` (and later admin actions). From `ADMIN_API_KEY`.
     pub admin_api_key: Option<String>,
+    /// Shared with identity-service to verify user JWTs. `None` = every Bearer token is rejected.
+    pub jwt_secret: Option<Vec<u8>>,
+    pub upstreams: UpstreamConfig,
+}
+
+/// Base URLs and refresh intervals for the Adaptor Data Eksternal (anti-corruption layer).
+#[derive(Debug, Clone)]
+pub struct UpstreamConfig {
+    pub timeout_ms: u64,
+    pub open_meteo_url: String,
+    pub petabencana_url: String,
+    pub osrm_url: String,
+    /// In MOCK_MODE, still ask the real OSRM for road geometry (risk stays mock-driven).
+    pub osrm_in_mock: bool,
+    pub tourism_base_url: Option<String>,
+    pub tourism_api_key: Option<String>,
+    pub health_base_url: Option<String>,
+    pub health_events_path: String,
+    pub health_api_key: Option<String>,
+    pub weather_refresh_s: u64,
+    pub disaster_refresh_s: u64,
+    pub partner_refresh_s: u64,
 }
 
 impl Config {
@@ -90,11 +112,37 @@ impl Config {
             return Err("ADMIN_API_KEY must be at least 16 characters".into());
         }
 
+        let url = |k: &str, d: &str| {
+            get(k)
+                .unwrap_or_else(|| d.to_string())
+                .trim_end_matches('/')
+                .to_string()
+        };
+        let upstreams = UpstreamConfig {
+            timeout_ms: parse_or(&get, "UPSTREAM_TIMEOUT_MS", 5000u64)?.clamp(500, 30_000),
+            open_meteo_url: url("OPEN_METEO_URL", "https://api.open-meteo.com"),
+            petabencana_url: url("PETABENCANA_URL", "https://data.petabencana.id"),
+            osrm_url: url("OSRM_URL", "https://router.project-osrm.org"),
+            osrm_in_mock: parse_bool(&get, "OSRM_IN_MOCK")?,
+            tourism_base_url: get("TOURISM_BASE_URL").map(|u| u.trim_end_matches('/').to_string()),
+            tourism_api_key: get("TOURISM_API_KEY"),
+            health_base_url: get("HEALTH_BASE_URL").map(|u| u.trim_end_matches('/').to_string()),
+            health_events_path: get("HEALTH_EVENTS_PATH")
+                .unwrap_or_else(|| "/donation-events".into()),
+            health_api_key: get("HEALTH_API_KEY"),
+            weather_refresh_s: parse_or(&get, "WEATHER_REFRESH_SECONDS", 600u64)?.max(60),
+            disaster_refresh_s: parse_or(&get, "DISASTER_REFRESH_SECONDS", 300u64)?.max(60),
+            partner_refresh_s: parse_or(&get, "PARTNER_REFRESH_SECONDS", 300u64)?.max(10),
+        };
         Ok(Self {
             port,
             database_path,
             api_keys,
             admin_api_key,
+            jwt_secret: get("JWT_SECRET")
+                .filter(|s| s.len() >= auth_token::MIN_SECRET_LEN)
+                .map(String::into_bytes),
+            upstreams,
             mock: MockConfig {
                 enabled: parse_bool(&get, "MOCK_MODE")?,
                 tick_seconds,
