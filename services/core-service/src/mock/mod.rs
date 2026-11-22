@@ -128,6 +128,7 @@ impl Generator {
             base_rain_mm_h: self.rng.range(0.0, 3.0),
             storm: None,
             temperature_offset_c: 0.0,
+            live_forecast: None,
         };
         w.set_weather(weather, now);
     }
@@ -141,10 +142,7 @@ impl Generator {
             active_scenario: self.active_scenario.clone(),
             live_reports: w.live_reports().count(),
             active_disasters: w.active_disasters().len(),
-            upstreams_down: w
-                .stale_upstream(now)
-                .map(|u| vec![u.to_string()])
-                .unwrap_or_default(),
+            upstreams_down: w.stale_upstreams(now),
         }
     }
 
@@ -230,6 +228,7 @@ impl Generator {
             description: Some(description(category, self.rng.int(0, 2))),
             severity: self.rng.int(1, 3) as u8,
             reporter,
+            origin: Default::default(),
         };
         if let Ok(r) = w.create_report(new, now) {
             let real = self.rng.chance(0.8);
@@ -325,6 +324,7 @@ impl Generator {
             description: Some(description(category, 0)),
             severity: 3,
             reporter: "user_01".into(),
+            origin: Default::default(),
         };
         let Ok(r) = w.create_report(new, now) else {
             return;

@@ -23,6 +23,16 @@ pub struct WeatherState {
     pub base_rain_mm_h: f64,
     pub storm: Option<Storm>,
     pub temperature_offset_c: f64,
+    /// Hourly forecast from Open-Meteo (live mode). `None` in mock mode: then the forecast is
+    /// derived from the current field (base rain halves every hour, storms end on time).
+    pub live_forecast: Option<Vec<ForecastSample>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForecastSample {
+    pub at: DateTime<Utc>,
+    pub rain_mm_h: f64,
+    pub temperature_c: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -59,6 +69,7 @@ impl WeatherState {
             base_rain_mm_h: 0.0,
             storm: None,
             temperature_offset_c: 0.0,
+            live_forecast: None,
         }
     }
 
@@ -95,12 +106,31 @@ impl WeatherState {
         }
     }
 
-    fn temperature(&self, rain: f64) -> f64 {
+    /// The model's temperature for a rain rate; live data sets `temperature_offset_c` so this
+    /// reproduces the observed temperature.
+    pub fn temperature(&self, rain: f64) -> f64 {
         30.0 - rain * 0.15 + self.temperature_offset_c
     }
 
     pub fn view_at(&self, lat: f64, lon: f64) -> WeatherView {
         let rain = self.rain_at(lat, lon);
+        if let Some(f) = &self.live_forecast {
+            return WeatherView {
+                observed_at: self.observed_at,
+                temperature_c: round1(self.temperature(rain)),
+                rain_mm_h: round1(rain),
+                condition: Self::condition(rain),
+                forecast_6h: f
+                    .iter()
+                    .take(6)
+                    .map(|p| ForecastPoint {
+                        at: p.at,
+                        rain_mm_h: round1(p.rain_mm_h.clamp(0.0, 60.0)),
+                        temperature_c: round1(p.temperature_c),
+                    })
+                    .collect(),
+            };
+        }
         let forecast_6h = (1..=6)
             .map(|h| {
                 let at = self.observed_at + Duration::hours(h);
@@ -196,6 +226,7 @@ mod tests {
                 ends_at: now + Duration::minutes(2),
             }),
             temperature_offset_c: 0.0,
+            live_forecast: None,
         };
         assert_eq!(w.rain_at(-6.9, 107.6), 42.0);
         assert_eq!(w.rain_at(-6.8, 107.7), 2.0);

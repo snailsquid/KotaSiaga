@@ -199,6 +199,7 @@ mod tests {
             expires_at: now + Duration::hours(3),
             reporter: "u".into(),
             cell: CellId::of(P.0, P.1).unwrap(),
+            origin: Default::default(),
         }
     }
 
@@ -209,6 +210,7 @@ mod tests {
             base_rain_mm_h: 0.0,
             storm: None,
             temperature_offset_c: 0.0,
+            live_forecast: None,
         }
     }
 

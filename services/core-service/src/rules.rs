@@ -68,3 +68,24 @@ pub const MAX_LIVE_REPORTS_MOCK: usize = 150;
 pub const ARCHIVE_CAPACITY: usize = 200;
 pub const RESOLVED_DISASTERS_CAPACITY: usize = 50;
 pub const MAX_BBOX_CELLS: usize = 2500;
+
+// Alerts (Peringatan).
+pub const MAX_SUBSCRIPTIONS_PER_USER: usize = 20;
+/// Half the diagonal of a 500 m cell: a cell touches a circle if its center is this much outside.
+pub const CELL_HALF_DIAGONAL_M: f64 = 354.0;
+/// Alerts kept per user; older ones are pruned.
+pub const ALERTS_KEPT_PER_USER: i64 = 200;
+
+// Reports from app users.
+/// Reports one user may create per rolling hour (429 after that).
+pub const MAX_REPORTS_PER_USER_PER_HOUR: usize = 10;
+
+// Safe routes (Rute Aman). cost = duration_s * (1 + ROUTE_RISK_WEIGHT * risk_penalty)
+//                                 + per-cell penalties for caution and danger cells.
+pub const ROUTE_RISK_WEIGHT: f64 = 2.0;
+pub const ROUTE_CAUTION_CELL_PENALTY_S: f64 = 60.0;
+pub const ROUTE_DANGER_CELL_PENALTY_S: f64 = 600.0;
+/// Sampling step when walking a route through the grid.
+pub const ROUTE_SAMPLE_M: f64 = 50.0;
+/// Synthetic routes in mock mode assume this average speed (about 30 km/h).
+pub const MOCK_ROUTE_SPEED_M_S: f64 = 8.3;

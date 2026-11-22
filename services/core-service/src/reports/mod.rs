@@ -57,6 +57,14 @@ impl ReportStatus {
     }
 }
 
+/// Who made a report. Only `User` reports are stored in SQLite; mock reports live in memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Origin {
+    #[default]
+    Mock,
+    User,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
     pub id: String,
@@ -76,6 +84,30 @@ pub struct Report {
     pub reporter: String,
     #[serde(skip)]
     pub cell: CellId,
+    #[serde(skip)]
+    pub origin: Origin,
+}
+
+impl Category {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Flood => "flood",
+            Self::Accident => "accident",
+            Self::RoadDamage => "road_damage",
+            Self::RoadClosure => "road_closure",
+            Self::EventCrowd => "event_crowd",
+        }
+    }
+}
+
+impl ReportStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Waiting => "waiting",
+            Self::Verified => "verified",
+            Self::Expired => "expired",
+        }
+    }
 }
 
 pub struct NewReport {
@@ -85,6 +117,18 @@ pub struct NewReport {
     pub description: Option<String>,
     pub severity: u8,
     pub reporter: String,
+    pub origin: Origin,
+}
+
+/// Untrusted free text: trims, drops control characters, keeps at most 500 characters.
+pub fn clean_description(raw: Option<String>) -> Option<String> {
+    raw.map(|d| {
+        d.chars()
+            .filter(|c| !c.is_control() || *c == '\n')
+            .collect::<String>()
+    })
+    .map(|d| d.trim().to_string())
+    .filter(|d| !d.is_empty())
 }
 
 impl NewReport {

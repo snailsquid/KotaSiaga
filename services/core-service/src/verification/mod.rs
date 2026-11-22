@@ -15,6 +15,23 @@ pub enum Vote {
     Dispute,
 }
 
+impl Vote {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Confirm => "confirm",
+            Self::Dispute => "dispute",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "confirm" => Some(Self::Confirm),
+            "dispute" => Some(Self::Dispute),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum VoteOutcome {
     Counted,
@@ -116,13 +133,25 @@ impl Verification {
         }
     }
 
+    /// Rebuilds a ballot from a stored vote (startup). The report's counters are already stored.
+    pub fn restore_vote(&mut self, report_id: &str, user: &str, vote: Vote, weight: f64) {
+        let ballot = self.ballots.entry(report_id.to_string()).or_default();
+        if ballot.voters.insert(user.to_string()) {
+            match vote {
+                Vote::Confirm => ballot.confirm_w += weight,
+                Vote::Dispute => ballot.dispute_w += weight,
+            }
+        }
+    }
+
     pub fn forget(&mut self, report_id: &str) {
         self.ballots.remove(report_id);
     }
 
-    pub fn clear(&mut self) {
-        self.ballots.clear();
-        self.reputation.clear();
+    /// Mock reset: keeps ballots of `keep` reports and app users' (`usr_...`) reputation.
+    pub fn reset_mock(&mut self, keep: &HashSet<String>) {
+        self.ballots.retain(|id, _| keep.contains(id));
+        self.reputation.retain(|user, _| user.starts_with("usr_"));
     }
 }
 
@@ -149,6 +178,7 @@ mod tests {
             expires_at: now,
             reporter: "reporter".into(),
             cell: CellId::of(-6.9, 107.6).unwrap(),
+            origin: Default::default(),
         }
     }
 

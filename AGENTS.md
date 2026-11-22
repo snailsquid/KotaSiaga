@@ -2,8 +2,8 @@
 
 Read this whole file before you write or change code, an API contract, or a doc. Every agent in this cluster (Claude Code, Codex, Cursor, Copilot, Gemini CLI, others) follows this same file so the three services stay compatible. If your own idea conflicts with this file, this file wins. If this file is silent or unclear, stop and ask a human. Do not guess.
 
-- Last updated: 2026-11-21. Owner: Smart City group (KotaSiaga).
-- Status tags: **CONFIRMED** = stated in the Tugas Besar brief or in that group's submitted DDD paper. **PROPOSED** = drafted here, the other group must agree. **TBD** = unknown, ask.
+- Last updated: 2026-11-22. Owner: Smart City group (KotaSiaga, class K02).
+- Status tags: **CONFIRMED** = stated in the Tugas Besar brief or in that group's submitted DDD paper. **FINAL** = decided by the owner; the other groups follow it. **PROPOSED** = drafted here, the other group must agree. **TBD** = unknown, ask.
 
 ## 0. Load this file in your agent
 
@@ -20,7 +20,7 @@ Do not copy sections of this file into other files. Edit this one and let the po
 
 | Group | Service | Public base URL | Provides to others | Status |
 |---|---|---|---|---|
-| Smart City | KotaSiaga | `https://kotasiaga.stei.<fun\|site>/api` (name and class: check API Registry) | risk level per area, weather, official disaster signals, citizen reports (incidents and events), safe routes, change feed | Section 4 is PROPOSED |
+| Smart City | KotaSiaga (K02) | now `https://kotasiaga.arkk.dev/api`; planned `https://kotasiaga.stei.site/api` | risk level per area, weather, official disaster signals, citizen reports (incidents and events), safe routes, change feed, partner points with risk | Section 4 is FINAL (owner decision 2026-11-22, openapi v1.0.0) |
 | Tourism | JelajahLokal | TBD | `GET /feed/destinations` (id, name, category, lat, lon; published only; `X-API-Key`) | CONFIRMED in their DDD |
 | Health | DonorKita | `https://donorkita.stei.site/api` | blood stock per type, nearest donation events, active request counts per region (`X-API-Key`) | CONFIRMED in their DDD; exact paths TBD |
 
@@ -49,7 +49,7 @@ Dates: DDD paper due end of Week 13 (2026-11-22). Base URL and docs in the API R
 
 ## 3. API conventions (all three services)
 
-- Public base is `https://<name>.stei.<fun|site>/api`. Paths below are relative to `/api`.
+- Public base is `https://<name>.stei.<fun|site>/api` (K02 uses `.stei.site`; KotaSiaga is served at `https://kotasiaga.arkk.dev/api` until the STB tunnel is up). Paths below are relative to `/api`.
 - JSON only. Keys are English `snake_case`. Enum values are lowercase English.
 - Time: ISO 8601 UTC with `Z`. Distance in meters, duration in seconds, temperature in °C.
 - Coordinates: `lat`, `lon`, decimal degrees WGS84. `bbox` is `min_lon,min_lat,max_lon,max_lat`. Radius is `radius_m`.
@@ -70,9 +70,9 @@ Dates: DDD paper due end of Week 13 (2026-11-22). Base URL and docs in the API R
 { "error": { "code": "invalid_api_key", "message": "API key tidak valid", "request_id": "..." } }
 ```
 
-  Codes: `invalid_api_key` 401, `forbidden` 403, `not_found` 404, `validation_error` 422, `rate_limited` 429, `upstream_unavailable` 503.
+  Codes: `invalid_api_key` 401, `invalid_token` 401 (user JWT or refresh token), `invalid_credentials` 401 (login), `forbidden` 403, `not_found` 404, `conflict` 409, `validation_error` 422, `rate_limited` 429, `upstream_unavailable` 503.
 
-## 4. Smart City contract (PROPOSED, KotaSiaga)
+## 4. Smart City contract (FINAL, KotaSiaga, openapi v1.0.0)
 
 Auth column: `key` = `X-API-Key`, `jwt` = user token, `pub` = none.
 
@@ -84,12 +84,17 @@ Auth column: `key` = `X-API-Key`, `jwt` = user token, `pub` = none.
 | `GET /weather?lat&lon` | key | current weather and 6 hour forecast |
 | `GET /disasters?bbox` | key | official disaster signals (source PetaBencana) |
 | `GET /reports?category&status&bbox&since&limit&offset` | key | citizen reports. Incidents and events are reports filtered by `category` |
-| `POST /routes/safe` | key | safe route between two points |
+| `POST /routes/safe` | key | safe route between two points (`destination` or `destination_id` from `/destination-points`) |
+| `GET /monitor-points?bbox&risk_level` | key | Tourism destinations (TitikPantau) with current risk |
+| `GET /destination-points?bbox&risk_level` | key | Health donation events (TitikTujuan) with current risk |
 | `GET /changes?since=<seq>&limit` | key | change feed for live updates |
-| `POST /auth/register`, `POST /auth/login` | pub | app users |
+| `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout` | pub | app users (login returns access + refresh token) |
+| `GET /auth/me` | jwt | the logged-in user |
 | `POST /reports` | jwt | create a report (status starts `waiting`) |
 | `POST /reports/{id}/votes` | jwt | body `{"vote":"confirm"\|"dispute"}` |
-| `POST /subscriptions`, `GET /subscriptions`, `GET /alerts` | jwt | area subscriptions and alerts |
+| `POST /subscriptions`, `GET /subscriptions`, `DELETE /subscriptions/{id}`, `GET /alerts` | jwt | area subscriptions and alerts |
+
+Read endpoints (`key`) also accept a user JWT instead of `X-API-Key`.
 
 Service area: Bandung Raya (lat -7.10 to -6.75, lon 107.45 to 107.80). Points outside return `422 validation_error`. A `/risk?bbox=` covers at most 2500 cells.
 
@@ -246,7 +251,7 @@ Domain event names stay as in the DDD paper (`LaporanTerverifikasi`, `LaporanKed
 
 ## 12. Open items
 
-- Group name, class (K01 or K02) and hostnames: confirm in the API Registry.
+- Group name `kotasiaga`, class K02, planned hostname `kotasiaga.stei.site`: register in the API Registry (current public URL `kotasiaga.arkk.dev`).
 - Health endpoint paths and fields; Tourism base URL.
 - Tourism ↔ Health arrows.
-- Section 4 and the enum values need a yes from Tourism and Health.
+- Section 4 is FINAL by owner decision (2026-11-22); Tourism and Health follow it once the docs are on Drive.

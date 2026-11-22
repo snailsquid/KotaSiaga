@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["services/core-service", "services/identity-service"]
+members = ["services/core-service", "services/identity-service", "services/auth-token"]
 
 [profile.release]
 opt-level = 3
