@@ -85,14 +85,16 @@ Never compile Rust on the deploy host: `docker-compose.yml` has no `build:` keys
 ### volta (Coolify)
 
 Coolify on volta runs this repo as a **git-based** Docker Compose app (`kotasiaga`, branch
-`master`, file `/docker-compose.yml`). It has to be git-based because the gateway bind-mounts
-`./gateway/nginx.conf` from the checkout. Coolify only sees compose changes once they are on `master`.
+`master`, file `/docker-compose.yml`). Coolify only sees compose changes once they are on `master`.
+The gateway's `nginx.conf` is baked into the `kotasiaga-gateway` image (`gateway/Dockerfile`), built
+and pushed by CI next to core and identity: Coolify resolves relative bind mounts under
+`/data/coolify/applications/<uuid>/`, where the repo files are not.
 
 After the images are pushed, the `deploy` job runs on the runner labelled `volta`, calls
-Coolify's deploy API, waits for that Coolify deployment to finish, then polls the health URL for up
+Coolify's deploy API (`POST /api/v1/deploy`), waits for that Coolify deployment to finish, then polls the health URL for up
 to 5 minutes and fails if it never returns `{"status":"ok"}`. The health endpoint has no version
 field, so the check proves the stack serves traffic, not which image runs.
-`core-service` and `identity-service` use `pull_policy: always`, so each deploy pulls `:latest`.
+`core-service`, `identity-service` and `gateway` use `pull_policy: always`, so each deploy pulls `:latest`.
 These repo secrets are needed (while any is unset the job is skipped with a warning in the log and
 in the run summary, and nothing is deployed):
 
@@ -117,7 +119,7 @@ Before you start:
 - **ARM STB: not supported right now.** CI publishes `linux/amd64` images only, so on an ARM
   host `docker compose pull`/`up` fails (no matching manifest). This returns when the arm64 leg
   comes back with GitHub Actions. An x86 STB works.
-- **GHCR must be reachable.** `core-service` and `identity-service` use `pull_policy: always`
+- **GHCR must be reachable.** `core-service`, `identity-service` and `gateway` use `pull_policy: always`
   (Coolify needs it to pick up `:latest`), so `docker compose up` fails when GHCR cannot be
   reached, even with the images already pulled. Offline, run `docker compose up -d --pull never`.
 - **Existing STB `.env`: add `COMPOSE_PROFILES=tunnel` before pulling this compose file.** The

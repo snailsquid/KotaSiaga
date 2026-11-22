@@ -5,7 +5,7 @@
 #
 # Images are linux/amd64 only for now (CI runs on Gitea on volta, no arm runner). An ARM host
 # (ARM STB) cannot run this stack until the arm64 leg returns with GitHub Actions.
-# `pull_policy: always` on the two services is what makes Coolify pick up a new `:latest`, but
+# `pull_policy: always` on the three services is what makes Coolify pick up a new `:latest`, but
 # it also makes `docker compose up` fail whenever GHCR is unreachable, even if the images are
 # already cached locally. On an offline host use `docker compose up --pull never`.
 name: kotasiaga
@@ -35,11 +35,13 @@ services:
     mem_limit: 64m
     cpus: 0.25
 
+  # nginx.conf is baked into the image (gateway/Dockerfile), not bind-mounted: Coolify resolves
+  # relative bind mounts under /data/coolify/applications/<uuid>/, where the repo is not.
   gateway:
-    image: nginx:1.28-alpine
+    image: ${IMAGE_REGISTRY:-ghcr.io/snailsquid}/kotasiaga-gateway:${IMAGE_TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     depends_on: [core-service, identity-service]
-    volumes: ["./gateway/nginx.conf:/etc/nginx/nginx.conf:ro"]
     # Loopback only, for local checks (GATEWAY_PORT=18080 on volta, since 8080 is Traefik's).
     # Public traffic: on volta, Coolify's Traefik (domain kotasiaga.arkk.dev); on an STB, the
     # `tunnel` service. Both reach the gateway over the compose network.

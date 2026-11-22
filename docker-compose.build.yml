@@ -5,3 +5,5 @@ services:
     build: { context: ., args: { SERVICE: core-service } }
   identity-service:
     build: { context: ., args: { SERVICE: identity-service } }
+  gateway:
+    build: { context: gateway }
