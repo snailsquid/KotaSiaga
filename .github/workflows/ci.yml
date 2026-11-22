@@ -46,7 +46,11 @@ jobs:
       PUBLISH: ${{ github.ref == 'refs/heads/master' }}
     strategy:
       matrix:
-        service: [core-service, identity-service]
+        include:
+          - { image: kotasiaga-core, context: ., dockerfile: Dockerfile, service: core-service }
+          - { image: kotasiaga-identity, context: ., dockerfile: Dockerfile, service: identity-service }
+          # nginx with gateway/nginx.conf baked in: Coolify cannot bind-mount files from the repo.
+          - { image: kotasiaga-gateway, context: gateway, dockerfile: gateway/Dockerfile, service: gateway }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -58,14 +62,13 @@ jobs:
           username: snailsquid
           password: ${{ secrets.GHCR_TOKEN }}
       - id: name
-        run: |
-          short="${{ matrix.service }}"; short="${short%-service}"
-          echo "image=${IMAGE_REGISTRY}/kotasiaga-${short}" >> "$GITHUB_OUTPUT"
+        run: echo "image=${IMAGE_REGISTRY}/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
       # cache-from needs no login while the GHCR package is public; if it cannot be read,
       # buildx logs a warning and builds without the cache.
       - uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           build-args: SERVICE=${{ matrix.service }}
           push: ${{ env.PUBLISH == 'true' }}
@@ -99,12 +102,14 @@ jobs:
             echo "triggered=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Coolify 4.7+ only accepts POST here (GET returns 405). The reply is
+          # {"deployments":[{"message","resource_uuid","deployment_uuid"}]}.
           # Retry only when no connection was made (6 = DNS, 7 = connect refused). A timeout
           # or HTTP error is not retried: the request may have reached Coolify, and a second
-          # GET could queue a second deploy.
+          # POST could queue a second deploy.
           for attempt in 1 2 3; do
             rc=0
-            body=$(curl --fail-with-body -sS --connect-timeout 10 --max-time 30 \
+            body=$(curl --fail-with-body -sS -X POST --connect-timeout 10 --max-time 30 \
               -H "Authorization: Bearer $COOLIFY_TOKEN" \
               "${COOLIFY_URL%/}/api/v1/deploy?uuid=${COOLIFY_RESOURCE_UUID}&force=false") || rc=$?
             if [ "$rc" -eq 6 ] || [ "$rc" -eq 7 ]; then
