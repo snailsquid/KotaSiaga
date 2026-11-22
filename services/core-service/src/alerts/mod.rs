@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::risk::grid::{CellId, distance_m};
 use crate::risk::{RiskGrid, RiskLevel};
-use crate::rules::{CELL_HALF_DIAGONAL_M, MAX_SUBSCRIPTIONS_PER_USER};
+use crate::rules::CELL_HALF_DIAGONAL_M;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Subscription {
@@ -113,10 +113,6 @@ impl Watch {
             user_id: self.sub.user_id.clone(),
         })
     }
-}
-
-pub fn subscription_limit_reached(count: usize) -> bool {
-    count >= MAX_SUBSCRIPTIONS_PER_USER
 }
 
 #[cfg(test)]

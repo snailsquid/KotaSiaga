@@ -85,37 +85,91 @@ async fn shutdown_signal() {
     tokio::select! { _ = ctrl_c => {}, _ = term => {} }
 }
 
-/// `identity-service backup [dest]`: consistent online copy with `VACUUM INTO` (safe in WAL mode while the
+/// `identity-service backup [dest] [--overwrite]`: consistent online copy with `VACUUM INTO` (safe in WAL mode while the
 /// service runs). Works in the distroless image: `docker compose exec identity-service /app backup`.
 /// Default destination `/data/backup.db` (replaced each time); prints the path and the result
 /// of `PRAGMA integrity_check` on the copy.
 async fn backup() {
     let src = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "/data/identity.db".into());
-    let dest = std::env::args()
-        .nth(2)
+    let args: Vec<String> = std::env::args().skip(2).collect();
+    let overwrite = args.iter().any(|a| a == "--overwrite");
+    let dest = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .cloned()
         .unwrap_or_else(|| "/data/backup.db".into());
-    let _ = std::fs::remove_file(&dest);
-    let db = store::open(&src)
+    match run_backup(&src, &dest, overwrite).await {
+        Ok(line) => println!("{line}"),
+        Err(e) => fatal_backup(&e),
+    }
+}
+
+/// Absolute, symlink-free form of `p`, also when the file does not exist yet.
+fn resolve(p: &std::path::Path) -> std::path::PathBuf {
+    if let Ok(c) = p.canonicalize() {
+        return c;
+    }
+    let parent = p
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let parent = parent
+        .canonicalize()
+        .unwrap_or_else(|_| parent.to_path_buf());
+    parent.join(p.file_name().unwrap_or_default())
+}
+
+/// Refuses a destination that is the live database (or one of its WAL/SHM/journal files), and an
+/// existing destination unless `overwrite` is set. The source is never deleted or written.
+pub fn check_backup_target(src: &str, dest: &str, overwrite: bool) -> Result<(), String> {
+    let (s, d) = (
+        resolve(std::path::Path::new(src)),
+        resolve(std::path::Path::new(dest)),
+    );
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+        let mut live = s.clone().into_os_string();
+        live.push(suffix);
+        if d.as_os_str() == live {
+            return Err(format!(
+                "destination {dest} is the live database ({src}{suffix}); choose another path"
+            ));
+        }
+    }
+    if d.exists() && !overwrite {
+        return Err(format!(
+            "destination {dest} already exists; remove it or pass --overwrite"
+        ));
+    }
+    Ok(())
+}
+
+/// `VACUUM INTO` copy of `src` at `dest` plus `PRAGMA integrity_check` on the copy.
+pub async fn run_backup(src: &str, dest: &str, overwrite: bool) -> Result<String, String> {
+    check_backup_target(src, dest, overwrite)?;
+    if overwrite {
+        // Safe: check_backup_target proved `dest` is not the live database or its side files.
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{dest}{suffix}"));
+        }
+    }
+    let db = store::open(src)
         .await
-        .unwrap_or_else(|e| fatal_backup(&format!("cannot open {src}: {e}")));
-    sqlx::query("VACUUM INTO ?")
-        .bind(&dest)
-        .execute(&db)
-        .await
-        .unwrap_or_else(|e| fatal_backup(&format!("VACUUM INTO failed: {e}")));
+        .map_err(|e| format!("cannot open {src}: {e}"))?;
+    let res = sqlx::query("VACUUM INTO ?").bind(dest).execute(&db).await;
     db.close().await;
-    let copy = store::open(&dest)
+    res.map_err(|e| format!("VACUUM INTO failed: {e}"))?;
+    let copy = store::open(dest)
         .await
-        .unwrap_or_else(|e| fatal_backup(&format!("cannot open the copy: {e}")));
+        .map_err(|e| format!("cannot open the copy: {e}"))?;
     let check: (String,) = sqlx::query_as("PRAGMA integrity_check")
         .fetch_one(&copy)
         .await
-        .unwrap_or_else(|e| fatal_backup(&format!("integrity check failed: {e}")));
+        .map_err(|e| format!("integrity check failed: {e}"))?;
     copy.close().await;
-    println!("backup {dest} integrity={}", check.0);
     if check.0 != "ok" {
-        std::process::exit(1);
+        return Err(format!("integrity check of {dest}: {}", check.0));
     }
+    Ok(format!("backup {dest} integrity=ok"))
 }
 
 fn fatal_backup(msg: &str) -> ! {
@@ -132,5 +186,56 @@ fn tune_malloc() {
     unsafe {
         libc::mallopt(libc::M_MMAP_THRESHOLD, 1 << 20);
         libc::mallopt(libc::M_ARENA_MAX, 2);
+    }
+}
+
+#[cfg(test)]
+mod backup_tests {
+    fn tmp() -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("ks-backup-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[tokio::test]
+    async fn never_touches_the_source() {
+        let dir = tmp();
+        let src = dir.join("live.db");
+        let src_s = src.to_str().unwrap().to_string();
+        let db = crate::store::open(&src_s).await.unwrap();
+        db.close().await;
+        let before = std::fs::read(&src).unwrap();
+        for dest in [
+            src_s.clone(),
+            format!("{src_s}-wal"),
+            dir.join("./live.db").to_str().unwrap().to_string(),
+        ] {
+            for overwrite in [false, true] {
+                let err = super::run_backup(&src_s, &dest, overwrite)
+                    .await
+                    .unwrap_err();
+                assert!(err.contains("live database"), "{dest}: {err}");
+            }
+        }
+        assert!(
+            src.exists() && std::fs::read(&src).unwrap() == before,
+            "source untouched"
+        );
+
+        let dest = dir.join("copy.db");
+        let dest_s = dest.to_str().unwrap();
+        assert!(
+            super::run_backup(&src_s, dest_s, false)
+                .await
+                .unwrap()
+                .ends_with("integrity=ok")
+        );
+        let err = super::run_backup(&src_s, dest_s, false).await.unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert!(
+            super::run_backup(&src_s, dest_s, true).await.is_ok(),
+            "--overwrite replaces a copy"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -7,3 +7,6 @@
 FROM nginx:1.28-alpine
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY docs /usr/share/nginx/html/docs
+# Trusted proxy list, generated at container start; the empty default keeps `nginx -t` valid.
+COPY entrypoint/40-trusted-proxies.sh /docker-entrypoint.d/40-trusted-proxies.sh
+RUN touch /etc/nginx/trusted_proxies.conf && chmod +x /docker-entrypoint.d/40-trusted-proxies.sh

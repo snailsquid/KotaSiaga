@@ -13,11 +13,11 @@ use super::envelope::{Envelope, Meta};
 use super::error::{ApiError, ErrorCode};
 use super::params::{self, Query};
 use crate::AppState;
-use crate::alerts::{Alert, Subscription, subscription_limit_reached};
+use crate::alerts::{Alert, Subscription};
 use crate::reports::{Category, NewReport, Origin, Report, clean_description};
 use crate::risk::RiskLevel;
 use crate::risk::grid::CellId;
-use crate::rules::MAX_REPORTS_PER_USER_PER_HOUR;
+use crate::rules::{MAX_REPORTS_PER_USER_PER_HOUR, MAX_SUBSCRIPTIONS_PER_USER};
 use crate::store;
 use crate::verification::{Vote, VoteError};
 
@@ -196,15 +196,6 @@ pub async fn create_subscription(
     if !(100..=5000).contains(&radius) {
         return Err(invalid("radius_m harus 100 sampai 5000"));
     }
-    let count = store::count_subscriptions(&st.db, &user.id)
-        .await
-        .map_err(ApiError::db)?;
-    if subscription_limit_reached(count) {
-        return Err(invalid(format!(
-            "Maksimal {} area langganan per akun",
-            crate::rules::MAX_SUBSCRIPTIONS_PER_USER
-        )));
-    }
     let sub = Subscription {
         id: format!("sub_{}", &uuid::Uuid::new_v4().simple().to_string()[..20]),
         name,
@@ -214,9 +205,15 @@ pub async fn create_subscription(
         created_at: Utc::now(),
         user_id: user.id.clone(),
     };
-    store::insert_subscription(&st.db, &sub)
+    // Count and insert are one statement, so parallel requests cannot pass the limit together.
+    let inserted = store::insert_subscription_limited(&st.db, &sub, MAX_SUBSCRIPTIONS_PER_USER)
         .await
         .map_err(ApiError::db)?;
+    if !inserted {
+        return Err(invalid(format!(
+            "Maksimal {MAX_SUBSCRIPTIONS_PER_USER} area langganan per akun"
+        )));
+    }
     st.engine
         .update(Utc::now(), |w| w.add_subscription(sub.clone()));
     Ok((

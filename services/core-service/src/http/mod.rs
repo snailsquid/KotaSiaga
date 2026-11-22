@@ -917,6 +917,39 @@ mod tests {
         assert_eq!(s, StatusCode::CONFLICT);
     }
 
+    /// 30 parallel POSTs for one user: exactly the limit gets created, the rest are refused.
+    #[tokio::test]
+    async fn subscription_limit_holds_under_concurrency() {
+        let st = state(false).await;
+        let t = token("usr_many");
+        let tasks: Vec<_> = (0..30)
+            .map(|i| {
+                let (st, t) = (st.clone(), t.clone());
+                tokio::spawn(async move {
+                    let body = json!({"name": format!("Area {i}"), "lat": -6.9, "lon": 107.6});
+                    call(&st, "POST", "/api/subscriptions", Some(body), Some(&t))
+                        .await
+                        .0
+                })
+            })
+            .collect();
+        let mut created = 0;
+        for task in tasks {
+            match task.await.unwrap() {
+                StatusCode::CREATED => created += 1,
+                StatusCode::UNPROCESSABLE_ENTITY => {}
+                other => panic!("unexpected {other}"),
+            }
+        }
+        assert_eq!(created, crate::rules::MAX_SUBSCRIPTIONS_PER_USER);
+        let n: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM alerts_subscriptions WHERE user_id = 'usr_many'")
+                .fetch_one(&st.db)
+                .await
+                .unwrap();
+        assert_eq!(n.0 as usize, crate::rules::MAX_SUBSCRIPTIONS_PER_USER);
+    }
+
     /// Regression for the tick vs /_mock lock-order deadlock: ticks on one OS thread,
     /// /_mock/state and /_mock/scenario from several tasks at the same time, for a fixed
     /// wall time. Fails (does not hang) if they ever block each other.

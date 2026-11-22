@@ -269,9 +269,17 @@ fn subscription_from(row: &sqlx::sqlite::SqliteRow) -> Option<Subscription> {
     })
 }
 
-pub async fn insert_subscription(db: &SqlitePool, s: &Subscription) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO alerts_subscriptions (id, user_id, name, lat, lon, radius_m, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+/// Inserts `s` only if its user has fewer than `max` subscriptions, in one statement (SQLite
+/// runs it atomically). Returns `false` when the limit is reached.
+pub async fn insert_subscription_limited(
+    db: &SqlitePool,
+    s: &Subscription,
+    max: usize,
+) -> Result<bool, sqlx::Error> {
+    let n = sqlx::query(
+        "INSERT INTO alerts_subscriptions (id, user_id, name, lat, lon, radius_m, created_at) \
+         SELECT ?, ?, ?, ?, ?, ?, ? \
+         WHERE (SELECT COUNT(*) FROM alerts_subscriptions WHERE user_id = ?) < ?",
     )
     .bind(&s.id)
     .bind(&s.user_id)
@@ -280,9 +288,12 @@ pub async fn insert_subscription(db: &SqlitePool, s: &Subscription) -> Result<()
     .bind(s.lon)
     .bind(s.radius_m as i64)
     .bind(ts(s.created_at))
+    .bind(&s.user_id)
+    .bind(max as i64)
     .execute(db)
-    .await?;
-    Ok(())
+    .await?
+    .rows_affected();
+    Ok(n == 1)
 }
 
 /// Deletes a subscription (and its alerts) if it belongs to `user_id`. Returns whether it existed.
@@ -323,16 +334,6 @@ pub async fn list_subscriptions(
         .iter()
         .filter_map(subscription_from)
         .collect())
-}
-
-pub async fn count_subscriptions(db: &SqlitePool, user_id: &str) -> Result<usize, sqlx::Error> {
-    Ok(
-        sqlx::query("SELECT COUNT(*) AS n FROM alerts_subscriptions WHERE user_id = ?")
-            .bind(user_id)
-            .fetch_one(db)
-            .await?
-            .get::<i64, _>("n") as usize,
-    )
 }
 
 pub async fn list_alerts(

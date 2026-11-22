@@ -217,7 +217,8 @@ curl -X POST -H "X-API-Key: $ADMIN_KEY" -H 'content-type: application/json' \
 ```
 
 Scenarios: `rain_storm`, `flood_verified`, `road_closure`, `event_crowd`, `disaster_signal`,
-`upstream_down`, `recover`, `reset`.
+`upstream_down`, `recover`, `reset`. `reset` clears only mock data (generated reports, their votes,
+mock users and disaster signals). Reports and votes from app users stay, both in memory and in SQLite.
 
 ## Evidence (localhost, 2026-11-22)
 
@@ -295,15 +296,24 @@ Without `JWT_SECRET`, both services still start, but login answers `503` and use
 ## Backup
 
 Never copy only the `.db` file (WAL mode). `scripts/backup.sh` asks each service binary to make a
-consistent online copy (`/app backup` runs `VACUUM INTO` and then `PRAGMA integrity_check`). It
-works in the distroless image, which has no shell. The script then copies the result out with
-`docker compose cp` and keeps the newest 14 per service:
+consistent online copy (`/app backup <dest> [--overwrite]` runs `VACUUM INTO` and then `PRAGMA
+integrity_check`). It works in the distroless image, which has no shell. The binary refuses a
+destination that is the live database or one of its `-wal`/`-shm` files, and refuses an existing
+destination unless `--overwrite` is given. The script finds the containers by their compose labels,
+copies the result out with `docker cp`, and keeps the newest 14 per service. It runs on any Docker
+host shell: an STB (project `kotasiaga`) or the Coolify host on volta (project = the app's UUID; set
+`PROJECT` when more than one stack is running):
 
 ```sh
-scripts/backup.sh                 # -> backups/core-<UTC time>.db, backups/identity-<UTC time>.db
+scripts/backup.sh                          # -> backups/core-<UTC time>.db, backups/identity-<UTC time>.db
+PROJECT=<coolify app uuid> scripts/backup.sh /var/backups/kotasiaga     # on volta, over SSH
 # daily at 03:15 with cron:
-15 3 * * * cd /path/to/KotaSiaga && scripts/backup.sh >> backups/backup.log 2>&1
+15 3 * * * PROJECT=kotasiaga /path/to/KotaSiaga/scripts/backup.sh /var/backups/kotasiaga >> /var/backups/kotasiaga/backup.log 2>&1
 ```
+
+Coolify's own "scheduled task" cannot run it, because the containers have no shell. Use cron on the
+host, or run `docker exec <core container> /app backup /data/backup.db --overwrite` as the scheduled
+command and copy `/data/backup.db` off the volume.
 
 To restore: stop the service, put the backup in the volume as `core.db` / `identity.db`, and
 remove any stale `-wal`/`-shm` files next to it.
@@ -326,6 +336,24 @@ curl http://127.0.0.1:8080/api/health
 ```
 
 ARM STB: not supported until CI builds `linux/arm64` images again (GHCR has amd64 only).
+
+**Secrets.** Both services refuse to start when `JWT_SECRET`, `ADMIN_API_KEY`, an `API_KEYS` entry or
+`TEST_ACCOUNT_PASSWORD` is still a `.env.example` placeholder (`CHANGE_ME...`), or when two groups
+share a key. Generate each value with `openssl rand -hex 32`.
+
+**Client IP and rate limits.** The gateway takes the client IP from `CF-Connecting-IP` only when the
+request comes from a container on one of its own Docker networks (the tunnel or Traefik). The list is
+generated at container start; add more with `TRUSTED_PROXY_CIDRS`. The proxy in front (Traefik on
+volta) must only accept traffic that came through the Cloudflare tunnel. Otherwise a client that
+reaches it directly can set the header and dodge the per-IP limits.
+
+**Shutdown.** On SIGTERM, core-service stops its ticker and waits up to 10 s for queued database
+writes. `POST /reports` and votes only answer after their rows are committed, so an acknowledged
+write survives a redeploy.
+
+**Token lifetimes.** Logout revokes the refresh token only. An access token stays valid until it
+expires (at most 1 hour). Refresh tokens are single use, but reusing an old one does not revoke the
+newer ones from the same login.
 
 ## Contract changes in v1.0.0 (for Tourism and Health)
 
