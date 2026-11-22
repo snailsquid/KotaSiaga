@@ -1,0 +1,1098 @@
+openapi: 3.0.3
+info:
+  title: KotaSiaga Smart City API
+  version: 1.0.0
+  license:
+    name: For coursework (TST x PWAM, ITB); test data only
+    url: https://kotasiaga.arkk.dev/api/docs
+  contact:
+    name: KotaSiaga (K02, Smart City)
+    email: kotasiaga@example.com
+  description: |
+    Kondisi kota dan rute aman untuk Bandung Raya: citizen reports and their verification,
+    per-cell risk (Aman / Waspada / Bahaya), weather, official disaster signals, safe routes,
+    area alerts, plus partner data (Tourism destinations, Health donation events) with risk.
+
+    Contract status: **FINAL** (v1.0.0, 2026-11-22). From now on only additive changes; a
+    breaking change needs a new major version and notice to Tourism (JelajahLokal) and Health
+    (DonorKita) first.
+
+    Auth: other groups send their own revocable group key in `X-API-Key` (ask the KotaSiaga
+    team, see README). App users log in at `/auth/login` and send `Authorization: Bearer <jwt>`.
+    Read endpoints and `/routes/safe` accept either; user actions need the JWT.
+    The gateway rate-limits every client IP (`429 rate_limited` with `Retry-After`).
+
+    Conventions: JSON, snake_case keys, lowercase enum values, ISO 8601 UTC with `Z`,
+    meters / seconds / °C, WGS84 `lat`/`lon`, `bbox` = `min_lon,min_lat,max_lon,max_lat`.
+
+    Service area: Bandung Raya (lat -7.10 to -6.75, lon 107.45 to 107.80), split into 500 m cells.
+    A `lat`/`lon` outside it returns `422 validation_error`; a `bbox` is clipped to it.
+servers:
+  - url: https://kotasiaga.arkk.dev/api
+    description: Current public deployment
+  - url: https://kotasiaga.stei.site/api
+    description: Planned class URL (K02, STB + Cloudflare tunnel)
+tags:
+  - name: system
+    description: Liveness.
+  - name: city
+    description: City status for other groups and the app.
+  - name: reports
+    description: Citizen reports (Pelaporan Insiden) and votes (Verifikasi & Reputasi).
+  - name: routes
+    description: Safe routes (Rute Aman).
+  - name: feed
+    description: Change feed for live updates (poll with `since=<meta.seq>`).
+  - name: auth
+    description: App user accounts (Identitas & Akses). Test data only.
+  - name: subscriptions
+    description: Area subscriptions and alerts (Peringatan).
+  - name: partners
+    description: Data from other groups' APIs (through our anti-corruption adapter), with KotaSiaga risk.
+  - name: mock
+    description: Only when MOCK_MODE=true, otherwise 404. Admin API key.
+
+security:
+  - ApiKey: []
+  - BearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Liveness
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok] }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /status:
+    get:
+      tags: [city]
+      summary: One-call summary around a point (Umpan Status Kota)
+      operationId: getStatus
+      parameters:
+        - $ref: '#/components/parameters/LatRequired'
+        - $ref: '#/components/parameters/LonRequired'
+        - name: radius_m
+          in: query
+          schema: { type: integer, minimum: 100, maximum: 10000, default: 1000 }
+      responses:
+        '200':
+          description: City status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/Status' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /risk:
+    get:
+      tags: [city]
+      summary: Risk of one cell (lat+lon) or all cells in a bbox
+      description: |
+        Give either `lat`+`lon` (returns one cell) or `bbox` (returns a list), not both.
+        A `bbox` may cover at most 2500 cells (about 25 x 25 km); larger boxes return 422.
+      operationId: getRisk
+      parameters:
+        - $ref: '#/components/parameters/Lat'
+        - $ref: '#/components/parameters/Lon'
+        - $ref: '#/components/parameters/Bbox'
+      responses:
+        '200':
+          description: Cell risk
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    oneOf:
+                      - $ref: '#/components/schemas/CellRisk'
+                      - type: array
+                        items: { $ref: '#/components/schemas/CellRisk' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /weather:
+    get:
+      tags: [city]
+      summary: Current weather and 6 hour forecast
+      operationId: getWeather
+      parameters:
+        - $ref: '#/components/parameters/LatRequired'
+        - $ref: '#/components/parameters/LonRequired'
+      responses:
+        '200':
+          description: Weather
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/Weather' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /disasters:
+    get:
+      tags: [city]
+      summary: Official disaster signals (source PetaBencana)
+      operationId: listDisasters
+      parameters:
+        - $ref: '#/components/parameters/Bbox'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Disaster signals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/DisasterSignal' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /reports:
+    get:
+      tags: [reports]
+      summary: Citizen reports. Incidents and events are reports filtered by category.
+      operationId: listReports
+      parameters:
+        - name: category
+          in: query
+          schema: { $ref: '#/components/schemas/ReportCategory' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ReportStatus' }
+        - $ref: '#/components/parameters/Bbox'
+        - name: since
+          in: query
+          description: Only reports created at or after this time.
+          schema: { type: string, format: date-time }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Reports
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Report' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    post:
+      tags: [reports]
+      summary: Create a report (status starts `waiting`)
+      operationId: createReport
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportCreate' }
+      description: |
+        Starts as `waiting` and never raises risk until other users verify it (sum of confirm
+        weights minus dispute weights reaches 3.0). One user may create 10 reports per hour.
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/Report' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /reports/{id}/votes:
+    post:
+      tags: [reports]
+      summary: Confirm or dispute a report
+      operationId: voteReport
+      description: |
+        The vote weighs the voter's reputation (0.2 to 1.0, new users 0.5). `403` for your own
+        report, `409` if you already voted or the report is no longer `waiting`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vote]
+              properties:
+                vote: { type: string, enum: [confirm, dispute] }
+      responses:
+        '200':
+          description: Vote recorded; returns the report with its current status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/Report' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /routes/safe:
+    post:
+      tags: [routes]
+      summary: Safe route between two points
+      description: |
+        Up to 3 candidate routes (OSRM driving alternatives) scored against the current risk
+        grid: `cost = duration_s * (1 + 2 * risk_penalty) + 60 s per Waspada cell + 600 s per
+        Bahaya cell`. The lowest cost is recommended and listed first. Give `destination`
+        coordinates or a `destination_id` from `/destination-points`. When OSRM is down the last
+        good answer for the same points is reused (`meta.stale: true`); with none, `503`.
+      operationId: getSafeRoute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SafeRouteRequest' }
+      responses:
+        '200':
+          description: Candidate routes with the recommended one
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/SafeRouteResult' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /monitor-points:
+    get:
+      tags: [partners]
+      summary: Tourism destinations (TitikPantau) with current risk
+      description: |
+        Published destinations from JelajahLokal `GET /feed/destinations`, refreshed every
+        5 minutes (every 30 s while their API is mocked), inside the service area only.
+        `meta.source` is `mock` while the Tourism upstream is mocked.
+      operationId: listMonitorPoints
+      parameters:
+        - $ref: '#/components/parameters/Bbox'
+        - $ref: '#/components/parameters/RiskLevelFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Monitor points
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/MonitorPoint' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /destination-points:
+    get:
+      tags: [partners]
+      summary: Health donation events (TitikTujuan) with current risk
+      description: |
+        Donation events from DonorKita, usable as `destination_id` in `/routes/safe`.
+        Same refresh, cache and `meta.source` rules as `/monitor-points`.
+      operationId: listDestinationPoints
+      parameters:
+        - $ref: '#/components/parameters/Bbox'
+        - $ref: '#/components/parameters/RiskLevelFilter'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Destination points
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/DestinationPoint' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /changes:
+    get:
+      tags: [feed]
+      summary: Change feed for live updates
+      description: |
+        Keeps the last 500 changes. If `since` is older than that window, `meta.reset` is true
+        and the consumer must refetch the full resource.
+      operationId: listChanges
+      parameters:
+        - name: since
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 0 }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Changes after `since`, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Change' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Register an app user (test data only)
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Log in and get a JWT
+      description: Access token lasts 1 hour; use the refresh token at `/auth/refresh`.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Token' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Swap a refresh token for a new token pair
+      description: Refresh tokens are single use; the old one is revoked.
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: New tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Token' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke a refresh token
+      operationId: logout
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '204': { description: Revoked (also when it was already invalid) }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: The logged-in user
+      operationId: getMe
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /subscriptions:
+    get:
+      tags: [subscriptions]
+      summary: The user's area subscriptions
+      operationId: listSubscriptions
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Subscriptions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Subscription' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    post:
+      tags: [subscriptions]
+      summary: Subscribe to an area
+      description: At most 20 areas per user. An alert is raised whenever the worst risk level inside the area changes.
+      operationId: createSubscription
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubscriptionCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/Subscription' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /subscriptions/{id}:
+    delete:
+      tags: [subscriptions]
+      summary: Remove one of your subscriptions (and its alerts)
+      operationId: deleteSubscription
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /alerts:
+    get:
+      tags: [subscriptions]
+      summary: Alerts for the user's subscribed areas, newest first
+      operationId: listAlerts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: subscription_id
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Alerts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Alert' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /_mock/scenario:
+    post:
+      tags: [mock]
+      summary: Trigger a demo scenario
+      operationId: triggerMockScenario
+      security:
+        - ApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  enum: [rain_storm, flood_verified, road_closure, event_crowd, disaster_signal, upstream_down, recover, reset]
+                lat: { type: number, format: double }
+                lon: { type: number, format: double }
+      responses:
+        '202':
+          description: Scenario accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/MockState' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /_mock/state:
+    get:
+      tags: [mock]
+      summary: Generator state and seed
+      operationId: getMockState
+      security:
+        - ApiKey: []
+      responses:
+        '200':
+          description: State
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/MockState' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: One key per group, revocable. Request one from the KotaSiaga team (README).
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from `/auth/login` (HS256, 1 hour).
+
+  parameters:
+    Lat:
+      name: lat
+      in: query
+      schema: { type: number, format: double, minimum: -90, maximum: 90 }
+    Lon:
+      name: lon
+      in: query
+      schema: { type: number, format: double, minimum: -180, maximum: 180 }
+    LatRequired:
+      name: lat
+      in: query
+      required: true
+      schema: { type: number, format: double, minimum: -90, maximum: 90 }
+    LonRequired:
+      name: lon
+      in: query
+      required: true
+      schema: { type: number, format: double, minimum: -180, maximum: 180 }
+    Bbox:
+      name: bbox
+      in: query
+      description: min_lon,min_lat,max_lon,max_lat
+      schema: { type: string, example: '107.54,-6.98,107.72,-6.84' }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    RiskLevelFilter:
+      name: risk_level
+      in: query
+      description: Only points whose cell has this risk level.
+      schema: { $ref: '#/components/schemas/RiskLevel' }
+
+  responses:
+    Unauthorized:
+      description: |
+        Missing or invalid credentials: `invalid_api_key` (group key), `invalid_token` (user JWT
+        or refresh token), `invalid_credentials` (wrong email or password at login).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Not allowed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Already exists or not allowed in the current state (`conflict`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: Invalid input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds to wait
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UpstreamUnavailable:
+      description: An upstream source is down and there is no cached data
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Meta:
+      type: object
+      required: [seq, updated_at, source, stale]
+      properties:
+        seq: { type: integer, format: int64, description: Rises on every data change }
+        updated_at: { type: string, format: date-time }
+        source: { type: string, enum: [live, mock] }
+        stale: { type: boolean, description: True when served from cache because a source is down }
+        reset: { type: boolean, description: Only on /changes when `since` is older than the retained window }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+              enum: [invalid_api_key, invalid_token, invalid_credentials, forbidden, not_found, conflict, validation_error, rate_limited, upstream_unavailable]
+            message: { type: string }
+            request_id: { type: string }
+
+    RiskLevel:
+      type: string
+      enum: [safe, caution, danger]
+      description: Aman / Waspada / Bahaya
+
+    ReportCategory:
+      type: string
+      enum: [flood, accident, road_damage, road_closure, event_crowd]
+
+    ReportStatus:
+      type: string
+      enum: [waiting, verified, expired]
+
+    WeatherCondition:
+      type: string
+      enum: [clear, cloudy, rain, heavy_rain, storm]
+
+    Point:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lon: { type: number, format: double, minimum: -180, maximum: 180 }
+
+    RiskFactor:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [rain, verified_report, disaster_signal] }
+        value: { type: number, description: 'For `rain`, mm/h' }
+        count: { type: integer, description: For `verified_report` and `disaster_signal` }
+
+    CellRisk:
+      type: object
+      required: [cell_id, risk_level, score, factors]
+      properties:
+        cell_id: { type: string, example: c_14_22 }
+        risk_level: { $ref: '#/components/schemas/RiskLevel' }
+        score: { type: number, minimum: 0 }
+        factors:
+          type: array
+          items: { $ref: '#/components/schemas/RiskFactor' }
+
+    ForecastPoint:
+      type: object
+      required: [at, rain_mm_h, temperature_c]
+      properties:
+        at: { type: string, format: date-time }
+        rain_mm_h: { type: number, minimum: 0 }
+        temperature_c: { type: number }
+
+    Weather:
+      type: object
+      required: [observed_at, temperature_c, rain_mm_h, condition, forecast_6h]
+      properties:
+        observed_at: { type: string, format: date-time }
+        temperature_c: { type: number }
+        rain_mm_h: { type: number, minimum: 0 }
+        condition: { $ref: '#/components/schemas/WeatherCondition' }
+        forecast_6h:
+          type: array
+          items: { $ref: '#/components/schemas/ForecastPoint' }
+
+    Status:
+      type: object
+      required: [cell_id, risk_level, weather, active_reports, disaster_signals]
+      properties:
+        cell_id: { type: string }
+        risk_level: { $ref: '#/components/schemas/RiskLevel' }
+        weather: { $ref: '#/components/schemas/Weather' }
+        active_reports: { type: integer, minimum: 0, description: 'Verified, not expired, within radius_m' }
+        disaster_signals: { type: integer, minimum: 0, description: Active signals within radius_m }
+
+    DisasterSignal:
+      type: object
+      required: [id, type, lat, lon, reported_at, status]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [flood, earthquake, fire, haze, wind, volcano] }
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+        reported_at: { type: string, format: date-time }
+        status: { type: string, enum: [active, resolved] }
+        resolved_at: { type: string, format: date-time, nullable: true }
+
+    Report:
+      type: object
+      required: [id, category, status, lat, lon, severity, created_at, expires_at]
+      properties:
+        id: { type: string }
+        category: { $ref: '#/components/schemas/ReportCategory' }
+        status: { $ref: '#/components/schemas/ReportStatus' }
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+        description: { type: string, maxLength: 500 }
+        severity: { type: integer, minimum: 1, maximum: 3 }
+        confirm_count: { type: integer, minimum: 0 }
+        dispute_count: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+        verified_at: { type: string, format: date-time, nullable: true }
+        expires_at: { type: string, format: date-time }
+
+    ReportCreate:
+      type: object
+      required: [category, lat, lon]
+      properties:
+        category: { $ref: '#/components/schemas/ReportCategory' }
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lon: { type: number, format: double, minimum: -180, maximum: 180 }
+        description: { type: string, maxLength: 500 }
+        severity: { type: integer, minimum: 1, maximum: 3, default: 2 }
+
+    SafeRouteRequest:
+      type: object
+      required: [origin]
+      description: Give exactly one of `destination` and `destination_id`.
+      properties:
+        origin: { $ref: '#/components/schemas/Point' }
+        destination: { $ref: '#/components/schemas/Point' }
+        destination_id:
+          type: string
+          description: An `id` from `/destination-points`
+          example: dnr_evt_001
+        alternatives: { type: integer, minimum: 1, maximum: 3, default: 3 }
+
+    LineString:
+      type: object
+      required: [type, coordinates]
+      properties:
+        type: { type: string, enum: [LineString] }
+        coordinates:
+          type: array
+          description: GeoJSON order, [lon, lat]
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items: { type: number }
+
+    Route:
+      type: object
+      required: [id, distance_m, duration_s, risk_penalty, max_risk_level, geometry, reasons]
+      properties:
+        id: { type: string }
+        distance_m: { type: number, minimum: 0 }
+        duration_s: { type: number, minimum: 0 }
+        risk_penalty: { type: number, minimum: 0, description: Length-weighted mean risk score along the route }
+        max_risk_level: { $ref: '#/components/schemas/RiskLevel' }
+        geometry: { $ref: '#/components/schemas/LineString' }
+        reasons:
+          type: array
+          items: { type: string }
+
+    SafeRouteResult:
+      type: object
+      required: [recommended_id, routes]
+      properties:
+        recommended_id: { type: string }
+        routes:
+          type: array
+          items: { $ref: '#/components/schemas/Route' }
+
+    Change:
+      type: object
+      required: [seq, at, type, entity_id, summary]
+      properties:
+        seq: { type: integer, format: int64 }
+        at: { type: string, format: date-time }
+        type:
+          type: string
+          enum: [report.created, report.verified, report.expired, risk.changed, weather.updated, disaster.created, disaster.resolved]
+        entity_id: { type: string }
+        summary: { type: string }
+
+    RegisterRequest:
+      type: object
+      required: [email, password, display_name]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, format: password }
+        display_name: { type: string, minLength: 1, maxLength: 60 }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+
+    User:
+      type: object
+      required: [id, email, display_name]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        display_name: { type: string }
+
+    Token:
+      type: object
+      required: [access_token, token_type, expires_in, refresh_token, refresh_expires_in, user]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, enum: [bearer] }
+        expires_in: { type: integer, description: Seconds }
+        refresh_token: { type: string, description: Single use; swap at /auth/refresh }
+        refresh_expires_in: { type: integer, description: Seconds }
+        user: { $ref: '#/components/schemas/User' }
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+
+    Subscription:
+      type: object
+      required: [id, name, lat, lon, radius_m, created_at, risk_level]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+        radius_m: { type: integer }
+        created_at: { type: string, format: date-time }
+        risk_level:
+          $ref: '#/components/schemas/RiskLevel'
+
+    SubscriptionCreate:
+      type: object
+      required: [name, lat, lon]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60, example: Rumah }
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lon: { type: number, format: double, minimum: -180, maximum: 180 }
+        radius_m: { type: integer, minimum: 100, maximum: 5000, default: 1000 }
+
+    Alert:
+      type: object
+      required: [id, subscription_id, cell_id, risk_level, previous_level, at, message]
+      properties:
+        id: { type: string }
+        subscription_id: { type: string }
+        cell_id: { type: string, description: The worst cell in the area }
+        risk_level: { $ref: '#/components/schemas/RiskLevel' }
+        previous_level: { $ref: '#/components/schemas/RiskLevel' }
+        at: { type: string, format: date-time }
+        message: { type: string, example: 'Rumah: risiko naik dari Aman ke Bahaya' }
+
+    MonitorPoint:
+      type: object
+      required: [id, name, category, lat, lon, cell_id, risk_level, rain_mm_h]
+      properties:
+        id: { type: string, example: tour_dst_01 }
+        name: { type: string }
+        category: { type: string, description: 'As given by Tourism, lowercased' }
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+        cell_id: { type: string }
+        risk_level: { $ref: '#/components/schemas/RiskLevel' }
+        rain_mm_h: { type: number, minimum: 0 }
+
+    DestinationPoint:
+      type: object
+      required: [id, name, kind, lat, lon, opens_at, closes_at, slots_available, cell_id, risk_level, rain_mm_h]
+      properties:
+        id: { type: string, example: dnr_evt_001 }
+        name: { type: string }
+        kind: { type: string, enum: [donation_event] }
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+        opens_at: { type: string, format: date-time, nullable: true }
+        closes_at: { type: string, format: date-time, nullable: true }
+        slots_available: { type: integer, minimum: 0, nullable: true }
+        cell_id: { type: string }
+        risk_level: { $ref: '#/components/schemas/RiskLevel' }
+        rain_mm_h: { type: number, minimum: 0 }
+
+    MockState:
+      type: object
+      required: [seed, tick_seconds, time_scale, tick]
+      properties:
+        seed: { type: integer, format: int64 }
+        tick_seconds: { type: integer }
+        time_scale: { type: integer }
+        tick: { type: integer, format: int64 }
+        active_scenario: { type: string, nullable: true }
+        live_reports: { type: integer }
+        active_disasters: { type: integer }
+        upstreams_down:
+          type: array
+          items: { type: string }

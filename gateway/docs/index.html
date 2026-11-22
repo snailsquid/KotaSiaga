@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KotaSiaga API docs</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
+  <style>body { margin: 0; background: #fafafa; } .topbar { display: none; }</style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    // The spec next to this page is a copy of the repo-root openapi.yaml (kept equal by a test).
+    // On a local stack, "Try it out" against the public server is sent to this host instead.
+    const local = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+    window.ui = SwaggerUIBundle({
+      url: "../openapi.yaml",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      persistAuthorization: true,
+      requestInterceptor: (req) => {
+        const pub = "https://kotasiaga.arkk.dev/api";
+        if (local && req.url.startsWith(pub)) {
+          req.url = window.location.origin + "/api" + req.url.slice(pub.length);
+        }
+        return req;
+      },
+    });
+  </script>
+</body>
+</html>

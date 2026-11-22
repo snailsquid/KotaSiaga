@@ -13,9 +13,15 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
+    if std::env::args().nth(1).as_deref() == Some("backup") {
+        backup().await;
+        return;
+    }
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .with_writer(std::io::stderr)
+        // Plain text in containers so `docker compose logs` stays greppable (call-log evidence).
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .init();
 
     let config = config::Config::from_env()
@@ -76,4 +82,42 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let term = std::future::pending::<()>();
     tokio::select! { _ = ctrl_c => {}, _ = term => {} }
+}
+
+/// `identity-service backup [dest]`: consistent online copy with `VACUUM INTO` (safe in WAL mode while the
+/// service runs). Works in the distroless image: `docker compose exec identity-service /app backup`.
+/// Default destination `/data/backup.db` (replaced each time); prints the path and the result
+/// of `PRAGMA integrity_check` on the copy.
+async fn backup() {
+    let src = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "/data/identity.db".into());
+    let dest = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| "/data/backup.db".into());
+    let _ = std::fs::remove_file(&dest);
+    let db = store::open(&src)
+        .await
+        .unwrap_or_else(|e| fatal_backup(&format!("cannot open {src}: {e}")));
+    sqlx::query("VACUUM INTO ?")
+        .bind(&dest)
+        .execute(&db)
+        .await
+        .unwrap_or_else(|e| fatal_backup(&format!("VACUUM INTO failed: {e}")));
+    db.close().await;
+    let copy = store::open(&dest)
+        .await
+        .unwrap_or_else(|e| fatal_backup(&format!("cannot open the copy: {e}")));
+    let check: (String,) = sqlx::query_as("PRAGMA integrity_check")
+        .fetch_one(&copy)
+        .await
+        .unwrap_or_else(|e| fatal_backup(&format!("integrity check failed: {e}")));
+    copy.close().await;
+    println!("backup {dest} integrity={}", check.0);
+    if check.0 != "ok" {
+        std::process::exit(1);
+    }
+}
+
+fn fatal_backup(msg: &str) -> ! {
+    eprintln!("identity-service: backup failed: {msg}");
+    std::process::exit(1);
 }
