@@ -260,6 +260,7 @@ dependencies = [
  "chrono",
  "http-body-util",
  "libc",
+ "partner-contracts",
  "reqwest",
  "serde",
  "serde_json",
@@ -910,6 +911,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "integration-service"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "http-body-util",
+ "partner-contracts",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1108,6 +1127,15 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link",
+]
+
+[[package]]
+name = "partner-contracts"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

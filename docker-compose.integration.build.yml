@@ -1,0 +1,6 @@
+# Local builds only, never on a deploy host (AGENTS.md section 9).
+#   docker compose -f docker-compose.integration.yml -f docker-compose.integration.build.yml up --build
+services:
+  integration-service:
+    build: { context: ., dockerfile: services/integration-service/Dockerfile }
+    pull_policy: build

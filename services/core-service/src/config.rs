@@ -51,6 +51,10 @@ pub struct MockConfig {
     pub tick_seconds: u64,
     pub time_scale: u32,
     pub seed: u64,
+    /// Serve the Tourism / Health mock (in that partner's own format) instead of calling it.
+    /// `MOCK_UPSTREAM_*` when set; otherwise follows `MOCK_MODE` (AGENTS.md section 7: in mock
+    /// mode every external input comes from the generator). A partner without a base URL is
+    /// always mocked, whatever these say.
     pub upstream_tourism: bool,
     pub upstream_health: bool,
 }
@@ -70,6 +74,7 @@ impl Config {
         let port = parse_or(&get, "PORT", 8080u16)?;
         let database_path = get("DATABASE_PATH").unwrap_or_else(|| "/data/core.db".into());
 
+        let mock_mode = parse_bool(&get, "MOCK_MODE")?;
         let tick_seconds = parse_or(&get, "MOCK_TICK_SECONDS", 5u64)?;
         if !(2..=60).contains(&tick_seconds) {
             return Err(format!(
@@ -160,12 +165,13 @@ impl Config {
                 .map(String::into_bytes),
             upstreams,
             mock: MockConfig {
-                enabled: parse_bool(&get, "MOCK_MODE")?,
+                enabled: mock_mode,
                 tick_seconds,
                 time_scale,
                 seed,
-                upstream_tourism: parse_bool(&get, "MOCK_UPSTREAM_TOURISM")?,
-                upstream_health: parse_bool(&get, "MOCK_UPSTREAM_HEALTH")?,
+                upstream_tourism: parse_opt_bool(&get, "MOCK_UPSTREAM_TOURISM")?
+                    .unwrap_or(mock_mode),
+                upstream_health: parse_opt_bool(&get, "MOCK_UPSTREAM_HEALTH")?.unwrap_or(mock_mode),
             },
         })
     }
@@ -185,9 +191,18 @@ fn parse_or<T: std::str::FromStr>(
 }
 
 fn parse_bool(get: &impl Fn(&str) -> Option<String>, key: &str) -> Result<bool, String> {
+    Ok(parse_opt_bool(get, key)?.unwrap_or(false))
+}
+
+/// `None` when unset (or blank), so a default can depend on another switch.
+fn parse_opt_bool(
+    get: &impl Fn(&str) -> Option<String>,
+    key: &str,
+) -> Result<Option<bool>, String> {
     match get(key).as_deref() {
-        None | Some("false") | Some("0") | Some("") => Ok(false),
-        Some("true") | Some("1") => Ok(true),
+        None | Some("") => Ok(None),
+        Some("false") | Some("0") => Ok(Some(false)),
+        Some("true") | Some("1") => Ok(Some(true)),
         Some(v) => Err(format!("{key} must be true or false, got {v}")),
     }
 }
@@ -222,6 +237,17 @@ mod tests {
         assert_eq!(c.mock.tick_seconds, 5);
         assert_eq!(c.mock.time_scale, 60);
         assert_eq!(c.mock.seed, 7);
+    }
+
+    #[test]
+    fn partner_mocks_follow_mock_mode_unless_set() {
+        let c = cfg(&[("MOCK_MODE", "true")]).unwrap();
+        assert!(c.mock.upstream_tourism && c.mock.upstream_health);
+        let c = cfg(&[("MOCK_MODE", "true"), ("MOCK_UPSTREAM_HEALTH", "false")]).unwrap();
+        assert!(c.mock.upstream_tourism && !c.mock.upstream_health);
+        let c = cfg(&[("MOCK_UPSTREAM_TOURISM", "true")]).unwrap();
+        assert!(c.mock.upstream_tourism && !c.mock.upstream_health);
+        assert!(cfg(&[("MOCK_UPSTREAM_TOURISM", "maybe")]).is_err());
     }
 
     #[test]

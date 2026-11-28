@@ -1,0 +1,8 @@
+{
+  "data": [
+    {"id": "1", "name": "Kampung Adat Cireundeu", "category": "culture_history", "lat": -6.9497, "lon": 107.5375, "updated_at": "2026-11-27T02:15:00Z"},
+    {"id": "2", "name": "Gua Pawon", "category": "nature", "lat": -6.8333, "lon": 107.4333, "updated_at": "2026-11-27T02:15:00Z"},
+    {"id": "3", "name": "Curug Cimahi", "category": "nature", "lat": -6.811, "lon": 107.556, "updated_at": "2026-11-27T02:15:00Z"}
+  ],
+  "meta": {"seq": 3, "updated_at": "2026-11-28T12:00:00Z", "source": "live", "stale": false, "total": 3}
+}

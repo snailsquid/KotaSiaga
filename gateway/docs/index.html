@@ -20,7 +20,7 @@
       deepLinking: true,
       persistAuthorization: true,
       requestInterceptor: (req) => {
-        const pub = "https://kotasiaga.arkk.dev/api";
+        const pub = "https://2bintang1hati.stei.site/api";
         if (local && req.url.startsWith(pub)) {
           req.url = window.location.origin + "/api" + req.url.slice(pub.length);
         }

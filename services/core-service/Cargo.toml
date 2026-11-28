@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 auth-token = { path = "../auth-token" }
+partner-contracts = { path = "../partner-contracts" }
 reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
 axum = "0.8.9"
 chrono = { version = "0.4.45", default-features = false, features = ["serde", "clock"] }

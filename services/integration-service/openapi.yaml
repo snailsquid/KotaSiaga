@@ -1,0 +1,649 @@
+openapi: 3.0.3
+info:
+  title: KotaSiaga Layanan Integrasi API
+  version: 1.0.0
+  license:
+    name: For coursework (TST x PWAM, ITB); test data only
+    url: https://kotasiaga.arkk.dev/api/openapi.yaml
+  contact:
+    name: KotaSiaga (K02, Smart City)
+    email: kotasiaga@example.com
+  description: |
+    Tugas 3 combined service, deployed OFF the STB. It joins three APIs for the KotaSiaga
+    mobile app:
+
+    - **KotaSiaga** (our microservice on the STB, `https://2bintang1hati.stei.site/api`):
+      risk per point, safe routes, city data, accounts, reports.
+    - **JelajahLokal** (Tourism, `https://chitatomigoreng.stei.site/api`):
+      `GET /feed/destinations` -> monitor points.
+    - **DonorKita** (Health, `https://donorkita.stei.site/api`):
+      `GET /donation-events` -> destination points for safe routes.
+
+    Partner feeds are refreshed in the background (every 5 min live, 30 s mocked) with
+    `limit=200` and paging through `meta.total`; risk per point every 30 s. Requests read
+    memory only. When an upstream is down the last good copy is served with
+    `meta.stale: true`; with no copy at all the answer is `503 upstream_unavailable`.
+
+    Auth: app users send their KotaSiaga JWT (`Authorization: Bearer`, from `/auth/login`),
+    checked against KotaSiaga. Server-to-server callers send an `X-API-Key` issued by this
+    service. Callers' credentials never go to the partners: this service uses its own keys.
+    Every client IP is rate limited (default 600 requests/minute, `429` with `Retry-After`).
+
+    Conventions as in the cluster contract: JSON, snake_case, ISO 8601 UTC with `Z`,
+    `bbox` = `min_lon,min_lat,max_lon,max_lat`, `limit` default 50 max 200, `offset`.
+    The KotaSiaga pass-through endpoints keep KotaSiaga's own contract
+    (`https://2bintang1hati.stei.site/api/docs`).
+servers:
+  - url: https://kotasiaga.arkk.dev/api
+    description: Layanan Integrasi (off-STB, Coolify on volta)
+tags:
+  - name: system
+    description: Liveness and upstream status.
+  - name: combined
+    description: New combined endpoints (KotaSiaga + JelajahLokal + DonorKita).
+  - name: kotasiaga
+    description: Pass-through to KotaSiaga so the app needs one base URL.
+  - name: mock
+    description: Only when MOCK_MODE=true, otherwise 404. Admin API key.
+security:
+  - BearerAuth: []
+  - ApiKey: []
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Liveness
+      operationId: health
+      security: []
+      responses:
+        '429': { $ref: '#/components/responses/Error' }
+        '200':
+          description: Up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /openapi.yaml:
+    get:
+      tags: [system]
+      summary: This document
+      operationId: openapi
+      security: []
+      responses:
+        '200':
+          description: OpenAPI 3 YAML
+          content:
+            application/yaml:
+              schema: { type: string }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /integration/status:
+    get:
+      tags: [system]
+      summary: Mode and freshness of each upstream (no secrets)
+      operationId: integrationStatus
+      security: []
+      responses:
+        '429': { $ref: '#/components/responses/Error' }
+        '200':
+          description: Upstream status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      kotasiaga:
+                        type: object
+                        properties:
+                          base_url: { type: string }
+                          risk_stale: { type: boolean }
+                          risk_points: { type: integer }
+                      tourism: { $ref: '#/components/schemas/UpstreamStatus' }
+                      health: { $ref: '#/components/schemas/UpstreamStatus' }
+                      mock_mode: { type: boolean }
+                      upstreams_down:
+                        type: array
+                        items: { type: string }
+                  meta: { $ref: '#/components/schemas/Meta' }
+
+  /monitor-points:
+    get:
+      tags: [combined]
+      summary: JelajahLokal destinations with KotaSiaga risk (TitikPantau)
+      operationId: listMonitorPoints
+      parameters:
+        - $ref: '#/components/parameters/Bbox'
+        - $ref: '#/components/parameters/RiskLevel'
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [nature, culture_history, local_culinary, tourism_village, craft]
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Monitor points
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/MonitorPoint' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
+  /destination-points:
+    get:
+      tags: [combined]
+      summary: DonorKita donation events with KotaSiaga risk (TitikTujuan)
+      operationId: listDestinationPoints
+      parameters:
+        - $ref: '#/components/parameters/Bbox'
+        - $ref: '#/components/parameters/RiskLevel'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Destination points
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/DestinationPoint' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
+  /routes/safe:
+    post:
+      tags: [combined]
+      summary: Safe route to a donation event, a destination, or coordinates
+      description: |
+        `destination_id` is an id from `/destination-points` (`dnr_…`) or `/monitor-points`
+        (`tour_…`), resolved from this service's copy of the partner feed; the route itself
+        comes from KotaSiaga `POST /routes/safe`. The answer is KotaSiaga's plus
+        `data.destination` (the resolved point, or null for coordinates).
+      operationId: safeRoute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [origin]
+              properties:
+                origin: { $ref: '#/components/schemas/Point' }
+                destination: { $ref: '#/components/schemas/Point' }
+                destination_id: { type: string, example: dnr_evt_1 }
+                alternatives: { type: integer, minimum: 1, maximum: 3, default: 3 }
+      responses:
+        '200':
+          description: Candidate routes, the recommended one first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [recommended_id, routes]
+                    properties:
+                      recommended_id: { type: string }
+                      routes:
+                        type: array
+                        items: { type: object, additionalProperties: true }
+                      destination:
+                        type: object
+                        nullable: true
+                        additionalProperties: true
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
+  /status:
+    get:
+      tags: [kotasiaga]
+      summary: KotaSiaga GET /status
+      operationId: getStatus
+      description: |
+        KotaSiaga read, same query and answer as KotaSiaga. Forwarded with the caller's JWT,
+        or with this service's KotaSiaga key for an `X-API-Key` caller. The last good answer
+        per query is kept; while KotaSiaga is down it is served with `meta.stale: true` (up
+        to 60 s for risk/status, 10 min for weather, 5 min otherwise).
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /risk:
+    get:
+      tags: [kotasiaga]
+      summary: KotaSiaga GET /risk
+      operationId: getRisk
+      description: |
+        KotaSiaga read, same query and answer as KotaSiaga. Forwarded with the caller's JWT,
+        or with this service's KotaSiaga key for an `X-API-Key` caller. The last good answer
+        per query is kept; while KotaSiaga is down it is served with `meta.stale: true` (up
+        to 60 s for risk/status, 10 min for weather, 5 min otherwise).
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /weather:
+    get:
+      tags: [kotasiaga]
+      summary: KotaSiaga GET /weather
+      operationId: getWeather
+      description: |
+        KotaSiaga read, same query and answer as KotaSiaga. Forwarded with the caller's JWT,
+        or with this service's KotaSiaga key for an `X-API-Key` caller. The last good answer
+        per query is kept; while KotaSiaga is down it is served with `meta.stale: true` (up
+        to 60 s for risk/status, 10 min for weather, 5 min otherwise).
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /disasters:
+    get:
+      tags: [kotasiaga]
+      summary: KotaSiaga GET /disasters
+      operationId: getDisasters
+      description: |
+        KotaSiaga read, same query and answer as KotaSiaga. Forwarded with the caller's JWT,
+        or with this service's KotaSiaga key for an `X-API-Key` caller. The last good answer
+        per query is kept; while KotaSiaga is down it is served with `meta.stale: true` (up
+        to 60 s for risk/status, 10 min for weather, 5 min otherwise).
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /changes:
+    get:
+      tags: [kotasiaga]
+      summary: KotaSiaga GET /changes
+      operationId: getChanges
+      description: |
+        KotaSiaga read, same query and answer as KotaSiaga. Forwarded with the caller's JWT,
+        or with this service's KotaSiaga key for an `X-API-Key` caller. The last good answer
+        per query is kept; while KotaSiaga is down it is served with `meta.stale: true` (up
+        to 60 s for risk/status, 10 min for weather, 5 min otherwise).
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /reports:
+    get:
+      tags: [kotasiaga]
+      summary: KotaSiaga GET /reports
+      operationId: getReports
+      description: |
+        KotaSiaga read, same query and answer as KotaSiaga. Forwarded with the caller's JWT,
+        or with this service's KotaSiaga key for an `X-API-Key` caller. The last good answer
+        per query is kept; while KotaSiaga is down it is served with `meta.stale: true` (up
+        to 60 s for risk/status, 10 min for weather, 5 min otherwise).
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [kotasiaga]
+      summary: KotaSiaga POST /reports
+      operationId: postReports
+      description: KotaSiaga user call with the caller's JWT (an API key is refused). Never cached.
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /reports/{id}/votes:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [kotasiaga]
+      summary: KotaSiaga POST /reports/{id}/votes
+      operationId: postReportsIdVotes
+      description: KotaSiaga user call with the caller's JWT (an API key is refused). Never cached.
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /alerts:
+    get:
+      tags: [kotasiaga]
+      summary: KotaSiaga GET /alerts
+      operationId: getAlerts
+      description: KotaSiaga user call with the caller's JWT (an API key is refused). Never cached.
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /subscriptions:
+    get:
+      tags: [kotasiaga]
+      summary: KotaSiaga GET /subscriptions
+      operationId: getSubscriptions
+      description: KotaSiaga user call with the caller's JWT (an API key is refused). Never cached.
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [kotasiaga]
+      summary: KotaSiaga POST /subscriptions
+      operationId: postSubscriptions
+      description: KotaSiaga user call with the caller's JWT (an API key is refused). Never cached.
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /subscriptions/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [kotasiaga]
+      summary: KotaSiaga DELETE /subscriptions/{id}
+      operationId: deleteSubscriptionsId
+      description: KotaSiaga user call with the caller's JWT (an API key is refused). Never cached.
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /auth/me:
+    get:
+      tags: [kotasiaga]
+      summary: KotaSiaga GET /auth/me
+      operationId: getAuthMe
+      description: KotaSiaga user call with the caller's JWT (an API key is refused). Never cached.
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /auth/register:
+    post:
+      tags: [kotasiaga]
+      summary: KotaSiaga POST /auth/register
+      operationId: postAuthRegister
+      description: KotaSiaga account call, public, same body and answer as KotaSiaga.
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /auth/login:
+    post:
+      tags: [kotasiaga]
+      summary: KotaSiaga POST /auth/login
+      operationId: postAuthLogin
+      description: KotaSiaga account call, public, same body and answer as KotaSiaga.
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /auth/refresh:
+    post:
+      tags: [kotasiaga]
+      summary: KotaSiaga POST /auth/refresh
+      operationId: postAuthRefresh
+      description: KotaSiaga account call, public, same body and answer as KotaSiaga.
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post:
+      tags: [kotasiaga]
+      summary: KotaSiaga POST /auth/logout
+      operationId: postAuthLogout
+      description: KotaSiaga account call, public, same body and answer as KotaSiaga.
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { $ref: '#/components/responses/Passthrough' }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
+  /_mock/scenario:
+    post:
+      tags: [mock]
+      summary: Take an upstream down (stale demo) or recover
+      operationId: mockScenario
+      security:
+        - ApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, enum: [upstream_down, recover] }
+                upstream: { type: string, enum: [tourism, health, kotasiaga], default: tourism }
+                seconds: { type: integer, minimum: 5, maximum: 600, default: 30 }
+      responses:
+        '202': { $ref: '#/components/responses/MockState' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /_mock/state:
+    get:
+      tags: [mock]
+      summary: Mock seed and upstreams currently down
+      operationId: mockState
+      security:
+        - ApiKey: []
+      responses:
+        '200': { $ref: '#/components/responses/MockState' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    ApiKey: { type: apiKey, in: header, name: X-API-Key }
+
+  parameters:
+    Bbox:
+      name: bbox
+      in: query
+      schema: { type: string, example: '107.55,-6.95,107.70,-6.85' }
+    RiskLevel:
+      name: risk_level
+      in: query
+      schema: { type: string, enum: [safe, caution, danger] }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+
+  responses:
+    Passthrough:
+      description: KotaSiaga's answer, unchanged (except `meta.stale` on a cached answer)
+      content:
+        application/json:
+          schema: { type: object, additionalProperties: true }
+    MockState:
+      description: Mock state
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  seed: { type: integer, format: int64 }
+                  upstreams_down:
+                    type: array
+                    items: { type: string }
+                  tourism: { type: string, enum: [mock, live] }
+                  health: { type: string, enum: [mock, live] }
+              meta: { $ref: '#/components/schemas/Meta' }
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Point:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat: { type: number, format: double, example: -6.9 }
+        lon: { type: number, format: double, example: 107.6 }
+
+    Meta:
+      type: object
+      required: [seq, updated_at, source, stale]
+      properties:
+        seq: { type: integer, format: int64, description: Rises on every change of the combined data }
+        updated_at: { type: string, format: date-time }
+        source: { type: string, enum: [live, mock] }
+        stale: { type: boolean }
+
+    ListMeta:
+      allOf:
+        - $ref: '#/components/schemas/Meta'
+        - type: object
+          required: [total]
+          properties:
+            total: { type: integer, description: 'Items after filtering, before limit and offset' }
+            sources:
+              type: object
+              description: Freshness per upstream (the partner feed, and KotaSiaga risk)
+              additionalProperties: true
+
+    UpstreamStatus:
+      type: object
+      properties:
+        mode: { type: string, enum: [live, mock] }
+        base_url: { type: string, nullable: true }
+        stale: { type: boolean }
+        fetched_at: { type: string, format: date-time, nullable: true }
+        items: { type: integer }
+        last_error: { type: string, nullable: true }
+
+    Risk:
+      type: object
+      properties:
+        cell_id: { type: string, nullable: true, example: c_43_37 }
+        risk_level: { type: string, nullable: true, enum: [safe, caution, danger], description: Null until KotaSiaga answered once }
+        rain_mm_h: { type: number, nullable: true }
+
+    MonitorPoint:
+      allOf:
+        - type: object
+          required: [id, source_id, name, category, lat, lon]
+          properties:
+            id: { type: string, example: tour_1 }
+            source_id: { type: string, example: '1', description: JelajahLokal id }
+            name: { type: string, example: Gedung Sate }
+            category: { type: string, example: culture_history }
+            lat: { type: number, format: double }
+            lon: { type: number, format: double }
+            updated_at: { type: string, format: date-time, nullable: true }
+        - $ref: '#/components/schemas/Risk'
+
+    DestinationPoint:
+      allOf:
+        - type: object
+          required: [id, source_id, name, kind, lat, lon]
+          properties:
+            id: { type: string, example: dnr_evt_1 }
+            source_id: { type: string, example: evt_1, description: DonorKita id }
+            name: { type: string }
+            kind: { type: string, enum: [donation_event] }
+            organizer: { type: string, nullable: true }
+            facility_id: { type: string, nullable: true, example: fac_1 }
+            address: { type: string, nullable: true }
+            lat: { type: number, format: double }
+            lon: { type: number, format: double }
+            opens_at: { type: string, format: date-time, nullable: true }
+            closes_at: { type: string, format: date-time, nullable: true }
+            slots_total: { type: integer, nullable: true }
+            slots_available: { type: integer, nullable: true, description: DonorKita `slots_free` }
+            capacity_per_hour: { type: integer, nullable: true }
+            status: { type: string, nullable: true, example: scheduled }
+            needed_blood_types:
+              type: array
+              items: { type: string, example: o_negative }
+            updated_at: { type: string, format: date-time, nullable: true }
+        - $ref: '#/components/schemas/Risk'
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+              enum: [invalid_api_key, invalid_token, invalid_credentials, forbidden, not_found, conflict, validation_error, rate_limited, upstream_unavailable]
+            message: { type: string }
+            request_id: { type: string }

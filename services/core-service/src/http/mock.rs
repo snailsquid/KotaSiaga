@@ -40,6 +40,8 @@ pub struct ScenarioRequest {
     name: String,
     lat: Option<f64>,
     lon: Option<f64>,
+    /// For `upstream_down`: open_meteo (default), petabencana, osrm, tourism or health.
+    upstream: Option<String>,
 }
 
 pub async fn scenario(
@@ -74,7 +76,9 @@ pub async fn scenario(
     };
     let now = chrono::Utc::now();
     st.engine
-        .update_mock(now, |g, w| g.scenario(w, &req.name, at, now))
+        .update_mock(now, |g, w| {
+            g.scenario_on(w, &req.name, at, req.upstream.as_deref(), now)
+        })
         .ok_or_else(not_found)?
         .map_err(|m| ApiError::new(ErrorCode::ValidationError, m))?;
     tracing::info!(scenario = req.name, "mock scenario triggered");

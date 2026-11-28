@@ -79,10 +79,17 @@ pub fn spawn_live_inputs(engine: Arc<Engine>, up: Upstream, cfg: &UpstreamConfig
 
 /// Mocked partners refresh every 30 s so their changes show up; real ones every
 /// `PARTNER_REFRESH_SECONDS` (default 5 min, the agreed cache TTL for the destinations feed).
-pub fn spawn_partner_feeds(partners: Arc<Partners>, up: Upstream, cfg: &UpstreamConfig) {
+/// In mock mode an `upstream_down` fault on `tourism` or `health` makes that refresh fail, so the
+/// last good copy is served with `meta.stale: true` (the stale banner can be demoed).
+pub fn spawn_partner_feeds(
+    partners: Arc<Partners>,
+    engine: Arc<Engine>,
+    up: Upstream,
+    cfg: &UpstreamConfig,
+) {
     let live_secs = cfg.partner_refresh_s;
     for which in [super::partners::TOURISM, super::partners::HEALTH] {
-        let (p, u) = (partners.clone(), up.clone());
+        let (p, u, e) = (partners.clone(), up.clone(), engine.clone());
         let mocked = if which == super::partners::TOURISM {
             p.tourism_cfg.mock || p.tourism_cfg.base_url.is_none()
         } else {
@@ -93,10 +100,15 @@ pub fn spawn_partner_feeds(partners: Arc<Partners>, up: Upstream, cfg: &Upstream
             let mut t = every(secs);
             loop {
                 t.tick().await;
+                let down = e
+                    .snapshot()
+                    .mock
+                    .as_ref()
+                    .is_some_and(|m| m.upstreams_down.iter().any(|d| d == which));
                 if which == super::partners::TOURISM {
-                    p.refresh_tourism(&u, Utc::now()).await;
+                    p.refresh_tourism(&u, Utc::now(), down).await;
                 } else {
-                    p.refresh_health(&u, Utc::now()).await;
+                    p.refresh_health(&u, Utc::now(), down).await;
                 }
             }
         });

@@ -1,24 +1,29 @@
 //! Other groups' APIs -> our points.
 //! - Tourism (JelajahLokal) `GET /feed/destinations` -> TitikPantau (monitor point).
-//! - Health (DonorKita) donation events -> TitikTujuan (destination point for safe routes).
+//! - Health (DonorKita) `GET /donation-events` -> TitikTujuan (destination point for safe routes).
 //!
-//! Upstream payloads are untrusted: only known fields are read, strings are length-capped and
-//! stripped of control characters, points outside the service area are dropped. When a partner
-//! API is not configured, or `MOCK_UPSTREAM_*` is on, a mock that answers in that partner's own
-//! format is used, and the same parser maps it, so the anti-corruption layer is always exercised.
+//! The partner contracts (parsers, real-shape mocks, sample payloads) live in the shared
+//! `partner-contracts` crate, so this adapter and the off-STB integration service read the
+//! partners the same way. Upstream payloads are untrusted: only known fields are read, strings
+//! are capped and stripped of control characters, points outside the service area are dropped.
+//! Both partners cap `limit` at 200, so every refresh asks for `limit=200` and pages through
+//! `meta.total`. When a partner API is not configured, or it is mocked (`MOCK_UPSTREAM_*`,
+//! which follow `MOCK_MODE` when unset), the mock answers in that partner's own format and the
+//! same parser maps it, so the anti-corruption layer is always exercised.
 
 use std::sync::RwLock;
 use std::time::Instant;
 
-use chrono::{DateTime, Duration, Timelike, Utc};
+use chrono::{DateTime, Utc};
+use partner_contracts::{Paginator, health, page_query, tourism};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::http::{FetchError, Upstream, log_call};
 use crate::rules::SERVICE_AREA;
 
-pub const TOURISM: &str = "tourism";
-pub const HEALTH: &str = "health";
+pub const TOURISM: &str = tourism::SERVICE;
+pub const HEALTH: &str = health::SERVICE;
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct MonitorPoint {
@@ -76,6 +81,8 @@ pub struct Partners {
     pub health: RwLock<Feed<DestinationPoint>>,
 }
 
+type MockFn = fn(DateTime<Utc>, usize, usize) -> Value;
+
 impl Partners {
     pub fn new(tourism: Partner, health: Partner) -> Self {
         Self {
@@ -110,15 +117,24 @@ impl Partners {
             .cloned()
     }
 
-    pub async fn refresh_tourism(&self, up: &Upstream, now: DateTime<Utc>) {
-        let res = fetch(up, TOURISM, &self.tourism_cfg, now, mock_tourism)
-            .await
-            .and_then(|v| parse_destinations(&v));
+    /// `down`: a mock fault is active for this partner (`upstream_down`), so the refresh fails
+    /// as if the partner were unreachable and the last good copy is served with `stale`.
+    pub async fn refresh_tourism(&self, up: &Upstream, now: DateTime<Utc>, down: bool) {
+        let res = fetch(
+            up,
+            TOURISM,
+            &self.tourism_cfg,
+            now,
+            tourism::mock_feed,
+            down,
+        )
+        .await
+        .and_then(|v| parse_destinations(&v));
         store(&self.tourism, res, now, TOURISM);
     }
 
-    pub async fn refresh_health(&self, up: &Upstream, now: DateTime<Utc>) {
-        let res = fetch(up, HEALTH, &self.health_cfg, now, mock_health)
+    pub async fn refresh_health(&self, up: &Upstream, now: DateTime<Utc>, down: bool) {
+        let res = fetch(up, HEALTH, &self.health_cfg, now, health::mock_events, down)
             .await
             .and_then(|v| parse_events(&v));
         store(&self.health, res, now, HEALTH);
@@ -145,239 +161,149 @@ fn store<T>(
     }
 }
 
+/// Every page of the partner list (`limit=200`, then `offset` until `meta.total`), combined.
 async fn fetch(
     up: &Upstream,
     service: &str,
     p: &Partner,
     now: DateTime<Utc>,
-    mock: fn(DateTime<Utc>) -> Value,
+    mock: MockFn,
+    down: bool,
 ) -> Result<Value, FetchError> {
-    match (&p.base_url, p.mock) {
-        (Some(base), false) => {
-            let url = format!("{base}{}", p.path);
-            let key = p.api_key.clone().unwrap_or_default();
-            up.get_json(
-                service,
-                &url,
-                &[("X-API-Key", key.as_str()), ("Accept", "application/json")],
-            )
-            .await
-        }
-        _ => {
-            let started = Instant::now();
-            let v = mock(now);
-            log_call(
-                service,
-                &p.path,
-                "200",
-                started.elapsed().as_millis() as u64,
-                1,
-                "mock",
-            );
-            Ok(v)
-        }
+    let mut pages = Paginator::new();
+    while let Some(offset) = pages.next_offset() {
+        let page = match (&p.base_url, p.mock) {
+            (Some(base), false) if !down => {
+                let url = format!("{base}{}?{}", p.path, page_query(offset));
+                let key = p.api_key.clone().unwrap_or_default();
+                up.get_json(
+                    service,
+                    &url,
+                    &[("X-API-Key", key.as_str()), ("Accept", "application/json")],
+                )
+                .await?
+            }
+            _ if down => {
+                log_call(service, &p.path, "simulated_down", 0, 1, "mock");
+                return Err(FetchError::Network("simulated outage (mock fault)".into()));
+            }
+            _ => {
+                let started = Instant::now();
+                let v = mock(now, partner_contracts::PAGE_LIMIT, offset);
+                let ms = started.elapsed().as_millis() as u64;
+                log_call(service, &p.path, "200", ms, 1, "mock");
+                v
+            }
+        };
+        pages
+            .push(page)
+            .map_err(|e| FetchError::Invalid(format!("{service}: {e}")))?;
     }
+    Ok(pages.finish())
 }
 
-// ---- Parsing (the anti-corruption part) ----
-
-fn items(v: &Value) -> Option<&Vec<Value>> {
-    v.get("data")
-        .and_then(Value::as_array)
-        .or_else(|| v.as_array())
-        .or_else(|| v.pointer("/data/items").and_then(Value::as_array))
-}
-
-fn text(v: Option<&Value>, max: usize) -> Option<String> {
-    let s: String = match v? {
-        Value::String(s) => s.chars().filter(|c| !c.is_control()).take(max).collect(),
-        Value::Number(n) => n.to_string(),
-        _ => return None,
-    };
-    let s = s.trim().to_string();
-    (!s.is_empty()).then_some(s)
-}
-
-fn first<'a>(o: &'a Value, keys: &[&str]) -> Option<&'a Value> {
-    keys.iter()
-        .find_map(|k| o.pointer(k).filter(|v| !v.is_null()))
-}
-
-fn coord(o: &Value, keys: &[&str]) -> Option<f64> {
-    let v = first(o, keys)?;
-    v.as_f64()
-        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
-        .filter(|x: &f64| x.is_finite())
-}
-
-fn time(o: &Value, keys: &[&str]) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(first(o, keys)?.as_str()?)
-        .ok()
-        .map(|t| t.with_timezone(&Utc))
-}
-
-const LAT: &[&str] = &["/lat", "/latitude", "/location/lat", "/location/latitude"];
-const LON: &[&str] = &[
-    "/lon",
-    "/lng",
-    "/longitude",
-    "/location/lon",
-    "/location/lng",
-    "/location/longitude",
-];
+// ---- Mapping to our points (the anti-corruption part) ----
 
 pub fn parse_destinations(v: &Value) -> Result<Vec<MonitorPoint>, FetchError> {
-    let list =
-        items(v).ok_or_else(|| FetchError::Invalid("tourism: expected data array".into()))?;
+    let list = tourism::parse(v).map_err(FetchError::Invalid)?;
     Ok(list
-        .iter()
+        .into_iter()
+        .filter(|d| SERVICE_AREA.contains(d.lat, d.lon))
         .take(500)
-        .filter_map(|o| {
-            let (lat, lon) = (coord(o, LAT)?, coord(o, LON)?);
-            if !SERVICE_AREA.contains(lat, lon) {
-                return None;
-            }
-            Some(MonitorPoint {
-                id: format!("tour_{}", text(o.get("id"), 64)?),
-                name: text(first(o, &["/name", "/title"]), 120)?,
-                category: text(o.get("category"), 40)
-                    .unwrap_or_else(|| "other".into())
-                    .to_lowercase(),
-                lat,
-                lon,
-            })
+        .map(|d| MonitorPoint {
+            id: format!("tour_{}", d.id),
+            name: d.name,
+            category: d.category,
+            lat: d.lat,
+            lon: d.lon,
         })
         .collect())
 }
 
 pub fn parse_events(v: &Value) -> Result<Vec<DestinationPoint>, FetchError> {
-    let list = items(v).ok_or_else(|| FetchError::Invalid("health: expected data array".into()))?;
+    let list = health::parse(v).map_err(FetchError::Invalid)?;
     Ok(list
-        .iter()
+        .into_iter()
+        .filter(|e| SERVICE_AREA.contains(e.lat, e.lon))
         .take(500)
-        .filter_map(|o| {
-            let (lat, lon) = (coord(o, LAT)?, coord(o, LON)?);
-            if !SERVICE_AREA.contains(lat, lon) {
-                return None;
-            }
-            let slots = first(o, &["/slots_available", "/available_slots"])
-                .and_then(Value::as_u64)
-                .or_else(|| {
-                    let q = o.get("quota")?.as_u64()?;
-                    let r = o.get("registered").and_then(Value::as_u64).unwrap_or(0);
-                    Some(q.saturating_sub(r))
-                })
-                .map(|n| n.min(100_000) as u32);
-            Some(DestinationPoint {
-                id: format!("dnr_{}", text(o.get("id"), 64)?),
-                name: text(first(o, &["/name", "/title", "/location/name"]), 120)?,
-                kind: "donation_event",
-                lat,
-                lon,
-                opens_at: time(o, &["/opens_at", "/starts_at", "/start_time"]),
-                closes_at: time(o, &["/closes_at", "/ends_at", "/end_time"]),
-                slots_available: slots,
-            })
+        .map(|e| DestinationPoint {
+            id: format!("dnr_{}", e.id),
+            name: e.name,
+            kind: "donation_event",
+            lat: e.lat,
+            lon: e.lon,
+            opens_at: e.opens_at,
+            closes_at: e.closes_at,
+            slots_available: e.slots_free,
         })
         .collect())
-}
-
-// ---- Mock upstreams, answering in each partner's own format ----
-
-const DESTINATIONS: [(&str, &str, f64, f64); 12] = [
-    ("Gedung Sate", "heritage", -6.9025, 107.6188),
-    ("Alun-alun Bandung", "public_space", -6.9218, 107.6070),
-    ("Jalan Braga", "heritage", -6.9175, 107.6093),
-    ("Gedung Merdeka", "museum", -6.9210, 107.6097),
-    ("Museum Geologi", "museum", -6.9008, 107.6215),
-    ("Taman Hutan Raya Djuanda", "nature", -6.8566, 107.6326),
-    ("Saung Angklung Udjo", "culture", -6.8975, 107.6556),
-    ("Kebun Binatang Bandung", "nature", -6.8902, 107.6075),
-    ("Trans Studio Bandung", "entertainment", -6.9254, 107.6366),
-    ("Teras Cikapundung", "public_space", -6.8997, 107.6060),
-    ("Pasar Baru Bandung", "shopping", -6.9175, 107.6020),
-    ("Punclut", "culinary", -6.8530, 107.6150),
-];
-
-/// 12 destinations; exactly one is unpublished at a time, and which one changes every 30 s.
-pub fn mock_tourism(now: DateTime<Utc>) -> Value {
-    let hidden = (now.timestamp() / 30).rem_euclid(DESTINATIONS.len() as i64) as usize;
-    let data: Vec<Value> = DESTINATIONS
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i != hidden)
-        .map(|(i, (name, cat, lat, lon))| json!({"id": format!("dst_{:02}", i + 1), "name": name, "category": cat, "lat": lat, "lon": lon}))
-        .collect();
-    json!({ "data": data })
-}
-
-const DONATION_SITES: [(&str, f64, f64); 6] = [
-    ("UDD PMI Kota Bandung, Jl. Aceh", -6.9097, 107.6175),
-    ("RSUP Dr. Hasan Sadikin", -6.8945, 107.5985),
-    ("RS Santo Borromeus", -6.8946, 107.6133),
-    ("Masjid Salman ITB", -6.8935, 107.6113),
-    ("RS Al Islam Bandung", -6.9378, 107.6667),
-    ("Trans Studio Mall", -6.9262, 107.6363),
-];
-
-/// Today's donation events (08:00-15:00 WIB). Free slots fall as people register and refill
-/// every 10 minutes, so the feed visibly changes.
-pub fn mock_health(now: DateTime<Utc>) -> Value {
-    let day = now
-        .date_naive()
-        .and_hms_opt(1, 0, 0)
-        .expect("01:00")
-        .and_utc(); // 08:00 WIB
-    let minute = (now.timestamp() / 60) as u64;
-    let data: Vec<Value> = DONATION_SITES
-        .iter()
-        .enumerate()
-        .map(|(i, (name, lat, lon))| {
-            let quota = 40 + 10 * i as u64;
-            let registered =
-                ((minute % 10) * quota / 10 + i as u64 * 3 + now.second() as u64 / 20) % quota;
-            json!({
-                "id": format!("evt_{:03}", i + 1),
-                "title": format!("Donor darah {name}"),
-                "location": {"name": name, "lat": lat, "lng": lon},
-                "start_time": day.to_rfc3339(),
-                "end_time": (day + Duration::hours(7)).to_rfc3339(),
-                "quota": quota,
-                "registered": registered,
-            })
-        })
-        .collect();
-    json!({ "data": data })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration;
+    use serde_json::json;
+
+    fn t0() -> DateTime<Utc> {
+        "2026-11-22T03:00:00Z".parse().unwrap()
+    }
 
     #[test]
     fn mock_tourism_publishes_and_unpublishes() {
-        let t0: DateTime<Utc> = "2026-11-22T00:00:00Z".parse().unwrap();
-        let a = parse_destinations(&mock_tourism(t0)).unwrap();
-        let b = parse_destinations(&mock_tourism(t0 + Duration::seconds(30))).unwrap();
+        let a = parse_destinations(&tourism::mock_feed(t0(), 200, 0)).unwrap();
+        let b =
+            parse_destinations(&tourism::mock_feed(t0() + Duration::seconds(30), 200, 0)).unwrap();
         assert_eq!(a.len(), 11);
         assert_eq!(b.len(), 11);
         assert_ne!(a, b, "a different destination is hidden every 30 s");
-        assert!(a[0].id.starts_with("tour_dst_"));
+        assert!(a[0].id.starts_with("tour_"));
+        assert!(
+            a[0].id["tour_".len()..].parse::<u32>().is_ok(),
+            "JelajahLokal ids are str(int)"
+        );
     }
 
     #[test]
     fn mock_health_maps_to_destination_points() {
-        let t0: DateTime<Utc> = "2026-11-22T03:00:00Z".parse().unwrap();
-        let ev = parse_events(&mock_health(t0)).unwrap();
+        let ev = parse_events(&health::mock_events(t0(), 200, 0)).unwrap();
         assert_eq!(ev.len(), 6);
         assert_eq!(ev[0].kind, "donation_event");
+        assert!(ev[0].id.starts_with("dnr_evt_"));
         assert!(ev[0].opens_at.unwrap() < ev[0].closes_at.unwrap());
         assert!(ev.iter().all(|e| e.slots_available.is_some()));
-        let later = parse_events(&mock_health(t0 + Duration::minutes(3))).unwrap();
-        assert_ne!(
-            ev[0].slots_available, later[0].slots_available,
-            "slots change over time"
+        let later =
+            parse_events(&health::mock_events(t0() + Duration::minutes(3), 200, 0)).unwrap();
+        let slots = |v: &[DestinationPoint]| {
+            v.iter()
+                .find(|d| d.id == "dnr_evt_1")
+                .unwrap()
+                .slots_available
+        };
+        assert_ne!(slots(&ev), slots(&later), "slots change over time");
+    }
+
+    /// DonorKita's real payload (`drives.py::_event_out`): `slots_free` becomes `slots_available`.
+    #[test]
+    fn real_donorkita_sample_keeps_free_slots() {
+        let v: Value = serde_json::from_str(health::SAMPLE).unwrap();
+        let ev = parse_events(&v).unwrap();
+        assert_eq!(ev.len(), 2);
+        assert_eq!(ev[0].id, "dnr_evt_1");
+        assert_eq!(ev[0].slots_available, Some(47));
+        assert_eq!(ev[1].slots_available, Some(32));
+    }
+
+    /// JelajahLokal's real payload (`feed.py`): Gua Pawon lies outside Bandung Raya.
+    #[test]
+    fn real_jelajahlokal_sample_maps_inside_the_area() {
+        let v: Value = serde_json::from_str(tourism::SAMPLE).unwrap();
+        let pts = parse_destinations(&v).unwrap();
+        assert_eq!(
+            pts.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            ["tour_1", "tour_3"]
         );
+        assert_eq!(pts[0].category, "culture_history");
     }
 
     #[test]
@@ -397,5 +323,62 @@ mod tests {
         assert_eq!(got[0].id, "tour_7");
         assert_eq!(got[0].category, "nature");
         assert!(parse_destinations(&json!({"error": "nope"})).is_err());
+    }
+
+    fn partner(base: Option<String>, mock: bool) -> Partner {
+        Partner {
+            base_url: base,
+            path: tourism::PATH.into(),
+            api_key: Some("k".repeat(16)),
+            mock,
+        }
+    }
+
+    /// A live partner with 450 destinations: three pages of `limit=200`, every item kept
+    /// (inside the area), and the key goes in `X-API-Key`.
+    #[tokio::test]
+    async fn live_feed_pages_through_meta_total() {
+        use axum::extract::Query;
+        use std::collections::HashMap;
+        let app = axum::Router::new().route(
+            "/feed/destinations",
+            axum::routing::get(
+                |Query(q): Query<HashMap<String, String>>, h: axum::http::HeaderMap| async move {
+                    assert_eq!(h["x-api-key"], "k".repeat(16));
+                    let limit: usize = q["limit"].parse().unwrap();
+                    let offset: usize = q["offset"].parse().unwrap();
+                    assert_eq!(limit, 200);
+                    let rows: Vec<Value> = (offset..(offset + limit).min(450))
+                        .map(|i| json!({"id": (i + 1).to_string(), "name": format!("D{i}"), "category": "nature", "lat": -6.9, "lon": 107.6, "updated_at": "2026-11-28T00:00:00Z"}))
+                        .collect();
+                    axum::Json(json!({"data": rows, "meta": {"seq": 1, "updated_at": "2026-11-28T00:00:00Z", "source": "live", "stale": false, "total": 450}}))
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let ps = Partners::new(
+            partner(Some(format!("http://{addr}")), false),
+            partner(None, true),
+        );
+        ps.refresh_tourism(&Upstream::new(2000), t0(), false).await;
+        let f = ps.monitor_points();
+        assert!(!f.stale && !f.mock);
+        assert_eq!(f.items.len(), 450);
+    }
+
+    #[tokio::test]
+    async fn simulated_outage_keeps_last_copy_and_marks_stale() {
+        let ps = Partners::new(partner(None, true), partner(None, true));
+        let up = Upstream::new(500);
+        ps.refresh_tourism(&up, t0(), false).await;
+        assert_eq!(ps.monitor_points().items.len(), 11);
+        ps.refresh_tourism(&up, t0(), true).await;
+        let f = ps.monitor_points();
+        assert!(f.stale);
+        assert_eq!(f.items.len(), 11, "last good copy kept");
+        ps.refresh_tourism(&up, t0(), false).await;
+        assert!(!ps.monitor_points().stale);
     }
 }
