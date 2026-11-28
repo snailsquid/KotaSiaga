@@ -1,0 +1,15 @@
+{
+  "data": [
+    {"id": "evt_1", "name": "Donor Darah Uji Kampus Ganesha", "organizer": "Unit Uji Kampus", "facility_id": "fac_1",
+     "address": "Kampus Uji Ganesha, Bandung", "lat": -6.8915, "lon": 107.6107,
+     "opens_at": "2036-11-29T01:00:00Z", "closes_at": "2036-11-29T06:00:00Z",
+     "slots_total": 50, "slots_free": 47, "capacity_per_hour": 10, "status": "scheduled",
+     "needed_blood_types": ["ab_negative", "o_negative"], "updated_at": "2026-11-28T12:00:00Z"},
+    {"id": "evt_2", "name": "Mobil Unit Uji Alun-Alun", "organizer": "UDD Uji Kota Bandung", "facility_id": "fac_1",
+     "address": "Alun-Alun Uji, Bandung", "lat": -6.9218, "lon": 107.6071,
+     "opens_at": "2036-11-30T01:00:00Z", "closes_at": "2036-11-30T05:00:00Z",
+     "slots_total": 32, "slots_free": 32, "capacity_per_hour": 8, "status": "scheduled",
+     "needed_blood_types": [], "updated_at": "2026-11-28T12:00:00Z"}
+  ],
+  "meta": {"seq": 12, "updated_at": "2026-11-28T12:00:00Z", "source": "live", "stale": false, "total": 2}
+}

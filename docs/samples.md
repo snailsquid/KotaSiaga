@@ -1,6 +1,6 @@
 # Sample requests and responses
 
-Captured from a local `docker compose` stack on 2026-11-22 06:57 UTC by
+Captured from a local `docker compose` stack on 2026-11-28 13:33 UTC by
 `scripts/validate_responses.py --samples`. Every response below passed the openapi.yaml schema check.
 Long arrays are cut to two items. Set `BASE`, `KEY` (group key), `TOKEN` (from login), `ADMIN_KEY`.
 
@@ -33,7 +33,7 @@ curl -s -X POST "$BASE/auth/login"  \
     "access_token": "eyJhbGciOiJIUzI1NiIsInR5...(jwt)",
     "expires_in": 3600,
     "refresh_expires_in": 2592000,
-    "refresh_token": "rt_b188dfb...(refresh token)",
+    "refresh_token": "rt_8b67e84...(refresh token)",
     "token_type": "bearer",
     "user": {
       "display_name": "Akun Uji KotaSiaga",
@@ -66,7 +66,7 @@ curl -s -X GET "$BASE/auth/me" -H "Authorization: Bearer $TOKEN"
 
 ```sh
 curl -s -X POST "$BASE/auth/register"  \
-  -H 'content-type: application/json' -d '{"email": "warga-a3a4b5ee@kotasiaga.test", "password": "<password>", "display_name": "Warga Uji"}'
+  -H 'content-type: application/json' -d '{"email": "warga-01f22e97@kotasiaga.test", "password": "<password>", "display_name": "Warga Uji"}'
 ```
 
 `201`
@@ -75,8 +75,8 @@ curl -s -X POST "$BASE/auth/register"  \
 {
   "data": {
     "display_name": "Warga Uji",
-    "email": "warga-a3a4b5ee@kotasiaga.test",
-    "id": "usr_daa9f83467374b69aedb"
+    "email": "warga-01f22e97@kotasiaga.test",
+    "id": "usr_fa2075983f1e48688024"
   }
 }
 ```
@@ -96,12 +96,12 @@ curl -s -X POST "$BASE/auth/refresh"  \
     "access_token": "eyJhbGciOiJIUzI1NiIsInR5...(jwt)",
     "expires_in": 3600,
     "refresh_expires_in": 2592000,
-    "refresh_token": "rt_bb5a353...(refresh token)",
+    "refresh_token": "rt_946c5f9...(refresh token)",
     "token_type": "bearer",
     "user": {
       "display_name": "Warga Uji",
-      "email": "warga-a3a4b5ee@kotasiaga.test",
-      "id": "usr_daa9f83467374b69aedb"
+      "email": "warga-01f22e97@kotasiaga.test",
+      "id": "usr_fa2075983f1e48688024"
     }
   }
 }
@@ -121,20 +121,20 @@ curl -s -X GET "$BASE/status?lat=-6.9&lon=107.6&radius_m=2000" -H "X-API-Key: $K
     "cell_id": "c_44_33",
     "risk_level": "safe",
     "weather": {
-      "observed_at": "2026-11-22T06:57:38.699273625Z",
-      "temperature_c": 28.7,
-      "rain_mm_h": 9.0,
+      "observed_at": "2026-11-28T13:33:57.178255168Z",
+      "temperature_c": 29.3,
+      "rain_mm_h": 3.2,
       "condition": "rain",
       "forecast_6h": [
         {
-          "at": "2026-11-22T07:57:38.699273625Z",
-          "rain_mm_h": 4.5,
-          "temperature_c": 29.4
+          "at": "2026-11-28T14:33:57.178255168Z",
+          "rain_mm_h": 1.6,
+          "temperature_c": 29.5
         },
         {
-          "at": "2026-11-22T08:57:38.699273625Z",
-          "rain_mm_h": 2.2,
-          "temperature_c": 29.7
+          "at": "2026-11-28T15:33:57.178255168Z",
+          "rain_mm_h": 0.8,
+          "temperature_c": 29.6
         },
         "..."
       ]
@@ -143,8 +143,8 @@ curl -s -X GET "$BASE/status?lat=-6.9&lon=107.6&radius_m=2000" -H "X-API-Key: $K
     "disaster_signals": 0
   },
   "meta": {
-    "seq": 34,
-    "updated_at": "2026-11-22T06:57:38.699273625Z",
+    "seq": 40,
+    "updated_at": "2026-11-28T13:33:57.178255168Z",
     "source": "mock",
     "stale": false
   }
@@ -166,7 +166,7 @@ curl -s -X GET "$BASE/risk?lat=-6.89&lon=107.61" -H "X-API-Key: $KEY"
     "factors": [
       {
         "type": "rain",
-        "value": 9.0
+        "value": 3.2
       },
       {
         "count": 0,
@@ -175,11 +175,11 @@ curl -s -X GET "$BASE/risk?lat=-6.89&lon=107.61" -H "X-API-Key: $KEY"
       "..."
     ],
     "risk_level": "safe",
-    "score": 0.07
+    "score": 0.03
   },
   "meta": {
-    "seq": 34,
-    "updated_at": "2026-11-22T06:57:38.699273625Z",
+    "seq": 40,
+    "updated_at": "2026-11-28T13:33:57.178255168Z",
     "source": "mock",
     "stale": false
   }
@@ -197,27 +197,27 @@ curl -s -X GET "$BASE/weather?lat=-6.89&lon=107.61" -H "X-API-Key: $KEY"
 ```json
 {
   "data": {
-    "observed_at": "2026-11-22T06:57:38.699273625Z",
-    "temperature_c": 28.7,
-    "rain_mm_h": 9.0,
+    "observed_at": "2026-11-28T13:33:57.178255168Z",
+    "temperature_c": 29.3,
+    "rain_mm_h": 3.2,
     "condition": "rain",
     "forecast_6h": [
       {
-        "at": "2026-11-22T07:57:38.699273625Z",
-        "rain_mm_h": 4.5,
-        "temperature_c": 29.4
+        "at": "2026-11-28T14:33:57.178255168Z",
+        "rain_mm_h": 1.6,
+        "temperature_c": 29.5
       },
       {
-        "at": "2026-11-22T08:57:38.699273625Z",
-        "rain_mm_h": 2.2,
-        "temperature_c": 29.7
+        "at": "2026-11-28T15:33:57.178255168Z",
+        "rain_mm_h": 0.8,
+        "temperature_c": 29.6
       },
       "..."
     ]
   },
   "meta": {
-    "seq": 34,
-    "updated_at": "2026-11-22T06:57:38.699273625Z",
+    "seq": 40,
+    "updated_at": "2026-11-28T13:33:57.178255168Z",
     "source": "mock",
     "stale": false
   }
@@ -238,25 +238,16 @@ curl -s -X GET "$BASE/disasters?limit=5" -H "X-API-Key: $KEY"
     {
       "id": "dis_1",
       "type": "flood",
-      "lat": -6.844927624097992,
-      "lon": 107.64971213440222,
-      "reported_at": "2026-11-22T06:57:18.693232293Z",
-      "status": "active",
-      "resolved_at": null
-    },
-    {
-      "id": "dis_2",
-      "type": "fire",
-      "lat": -6.950721859879102,
-      "lon": 107.63236083903274,
-      "reported_at": "2026-11-22T06:57:38.699273625Z",
+      "lat": -6.920255029032895,
+      "lon": 107.6468688293279,
+      "reported_at": "2026-11-28T13:33:17.175121610Z",
       "status": "active",
       "resolved_at": null
     }
   ],
   "meta": {
-    "seq": 34,
-    "updated_at": "2026-11-22T06:57:38.699273625Z",
+    "seq": 40,
+    "updated_at": "2026-11-28T13:33:57.178255168Z",
     "source": "mock",
     "stale": false
   }
@@ -275,38 +266,38 @@ curl -s -X GET "$BASE/reports?limit=3" -H "X-API-Key: $KEY"
 {
   "data": [
     {
-      "id": "rpt_4",
-      "category": "flood",
+      "id": "rpt_60",
+      "category": "accident",
       "status": "waiting",
-      "lat": -6.965075602618643,
-      "lon": 107.54909923016125,
-      "description": "Banjir di depan pertokoan",
+      "lat": -6.925714498784389,
+      "lon": 107.70817811511903,
+      "description": "Tabrakan dua motor",
       "severity": 2,
-      "confirm_count": 2,
-      "dispute_count": 1,
-      "created_at": "2026-11-22T06:57:28.694497354Z",
+      "confirm_count": 0,
+      "dispute_count": 0,
+      "created_at": "2026-11-28T13:33:57.178255168Z",
       "verified_at": null,
-      "expires_at": "2026-11-22T07:00:28.694497354Z"
+      "expires_at": "2026-11-28T13:35:57.178255168Z"
     },
     {
-      "id": "rpt_3",
-      "category": "flood",
+      "id": "rpt_59",
+      "category": "road_damage",
       "status": "waiting",
-      "lat": -6.960049734032472,
-      "lon": 107.63087680956909,
-      "description": "Genangan setinggi mata kaki",
-      "severity": 3,
-      "confirm_count": 3,
-      "dispute_count": 1,
-      "created_at": "2026-11-22T06:57:13.697000826Z",
+      "lat": -6.949651726334524,
+      "lon": 107.63554189463085,
+      "description": "Aspal retak dan amblas",
+      "severity": 1,
+      "confirm_count": 0,
+      "dispute_count": 0,
+      "created_at": "2026-11-28T13:33:52.177606396Z",
       "verified_at": null,
-      "expires_at": "2026-11-22T07:00:13.697000826Z"
+      "expires_at": "2026-11-28T14:03:52.177606396Z"
     },
     "..."
   ],
   "meta": {
-    "seq": 34,
-    "updated_at": "2026-11-22T06:57:38.699273625Z",
+    "seq": 40,
+    "updated_at": "2026-11-28T13:33:57.178255168Z",
     "source": "mock",
     "stale": false
   }
@@ -326,23 +317,23 @@ curl -s -X GET "$BASE/changes?since=0&limit=3" -H "X-API-Key: $KEY"
   "data": [
     {
       "seq": 1,
-      "at": "2026-11-22T06:57:08.684345147Z",
+      "at": "2026-11-28T13:32:52.170917096Z",
       "type": "weather.updated",
       "entity_id": "bandung",
-      "summary": "Hujan 2.9 mm/jam"
+      "summary": "Hujan 0.5 mm/jam"
     },
     {
       "seq": 2,
-      "at": "2026-11-22T06:57:13.697000826Z",
-      "type": "weather.updated",
-      "entity_id": "bandung",
-      "summary": "Hujan 3.2 mm/jam"
+      "at": "2026-11-28T13:32:52.172276656Z",
+      "type": "report.expired",
+      "entity_id": "rpt_1",
+      "summary": "Genangan kedaluwarsa"
     },
     "..."
   ],
   "meta": {
-    "seq": 34,
-    "updated_at": "2026-11-22T06:57:38.699273625Z",
+    "seq": 40,
+    "updated_at": "2026-11-28T13:33:57.178255168Z",
     "source": "mock",
     "stale": false
   }
@@ -361,30 +352,30 @@ curl -s -X GET "$BASE/monitor-points?limit=3" -H "X-API-Key: $KEY"
 {
   "data": [
     {
-      "id": "tour_dst_01",
+      "id": "tour_1",
       "name": "Gedung Sate",
-      "category": "heritage",
+      "category": "culture_history",
       "lat": -6.9025,
       "lon": 107.6188,
       "cell_id": "c_43_37",
       "risk_level": "safe",
-      "rain_mm_h": 9.0
+      "rain_mm_h": 3.2
     },
     {
-      "id": "tour_dst_02",
-      "name": "Alun-alun Bandung",
-      "category": "public_space",
-      "lat": -6.9218,
-      "lon": 107.607,
-      "cell_id": "c_39_34",
+      "id": "tour_2",
+      "name": "Jalan Braga",
+      "category": "culture_history",
+      "lat": -6.9175,
+      "lon": 107.6093,
+      "cell_id": "c_40_35",
       "risk_level": "safe",
-      "rain_mm_h": 9.0
+      "rain_mm_h": 3.2
     },
     "..."
   ],
   "meta": {
-    "seq": 34,
-    "updated_at": "2026-11-22T06:57:38.699273625Z",
+    "seq": 40,
+    "updated_at": "2026-11-28T13:33:57.178255168Z",
     "source": "mock",
     "stale": false
   }
@@ -403,36 +394,36 @@ curl -s -X GET "$BASE/destination-points?limit=3" -H "X-API-Key: $KEY"
 {
   "data": [
     {
-      "id": "dnr_evt_001",
-      "name": "Donor darah UDD PMI Kota Bandung, Jl. Aceh",
+      "id": "dnr_evt_1",
+      "name": "Donor Darah UDD PMI Kota Bandung",
       "kind": "donation_event",
       "lat": -6.9097,
       "lon": 107.6175,
-      "opens_at": "2026-11-22T01:00:00Z",
-      "closes_at": "2026-11-22T08:00:00Z",
-      "slots_available": 11,
+      "opens_at": "2026-11-29T01:00:00Z",
+      "closes_at": "2026-11-29T06:00:00Z",
+      "slots_available": 28,
       "cell_id": "c_42_37",
       "risk_level": "safe",
-      "rain_mm_h": 9.0
+      "rain_mm_h": 3.2
     },
     {
-      "id": "dnr_evt_002",
-      "name": "Donor darah RSUP Dr. Hasan Sadikin",
+      "id": "dnr_evt_2",
+      "name": "Donor Darah RSUP Dr. Hasan Sadikin",
       "kind": "donation_event",
       "lat": -6.8945,
       "lon": 107.5985,
-      "opens_at": "2026-11-22T01:00:00Z",
-      "closes_at": "2026-11-22T08:00:00Z",
-      "slots_available": 11,
+      "opens_at": "2026-11-29T01:30:00Z",
+      "closes_at": "2026-11-29T05:30:00Z",
+      "slots_available": 23,
       "cell_id": "c_45_32",
       "risk_level": "safe",
-      "rain_mm_h": 9.0
+      "rain_mm_h": 3.2
     },
     "..."
   ],
   "meta": {
-    "seq": 34,
-    "updated_at": "2026-11-22T06:57:38.699273625Z",
+    "seq": 40,
+    "updated_at": "2026-11-28T13:33:57.178255168Z",
     "source": "mock",
     "stale": false
   }
@@ -455,24 +446,24 @@ curl -s -X POST "$BASE/routes/safe" -H "X-API-Key: $KEY" \
     "routes": [
       {
         "id": "r1",
-        "distance_m": 4303.0,
-        "duration_s": 375.0,
-        "risk_penalty": 0.08,
-        "max_risk_level": "caution",
+        "distance_m": 2513.0,
+        "duration_s": 303.0,
+        "risk_penalty": 0.03,
+        "max_risk_level": "safe",
         "geometry": {
           "type": "LineString",
           "coordinates": [
             [
-              107.618799,
-              -6.902236
+              107.6188,
+              -6.9025
             ],
             [
-              107.618544,
-              -6.902237
+              107.61830833333335,
+              -6.9033041666666675
             ],
             [
-              107.618199,
-              -6.902242
+              107.61781666666666,
+              -6.904108333333332
             ],
             [
               "..."
@@ -481,15 +472,45 @@ curl -s -X POST "$BASE/routes/safe" -H "X-API-Key: $KEY" \
         },
         "reasons": [
           "Rute tercepat",
-          "Melewati 1 area Waspada",
-          "..."
+          "Tidak ada risiko tercatat di jalur ini"
         ]
-      }
+      },
+      {
+        "id": "r2",
+        "distance_m": 2592.0,
+        "duration_s": 312.0,
+        "risk_penalty": 0.03,
+        "max_risk_level": "safe",
+        "geometry": {
+          "type": "LineString",
+          "coordinates": [
+            [
+              107.6188,
+              -6.9025
+            ],
+            [
+              107.61796924305557,
+              -6.903096847222224
+            ],
+            [
+              107.6171679722222,
+              -6.903711722222221
+            ],
+            [
+              "..."
+            ]
+          ]
+        },
+        "reasons": [
+          "Tidak ada risiko tercatat di jalur ini"
+        ]
+      },
+      "..."
     ]
   },
   "meta": {
-    "seq": 34,
-    "updated_at": "2026-11-22T06:57:38.699273625Z",
+    "seq": 40,
+    "updated_at": "2026-11-28T13:33:57.178255168Z",
     "source": "mock",
     "stale": false
   }
@@ -508,7 +529,7 @@ curl -s -X POST "$BASE/reports" -H "Authorization: Bearer $TOKEN" \
 ```json
 {
   "data": {
-    "id": "rpt_5",
+    "id": "rpt_61",
     "category": "flood",
     "status": "waiting",
     "lat": -6.9175,
@@ -517,13 +538,13 @@ curl -s -X POST "$BASE/reports" -H "Authorization: Bearer $TOKEN" \
     "severity": 2,
     "confirm_count": 0,
     "dispute_count": 0,
-    "created_at": "2026-11-22T06:57:40.806621323Z",
+    "created_at": "2026-11-28T13:33:58.007006411Z",
     "verified_at": null,
-    "expires_at": "2026-11-22T07:00:40.806621323Z"
+    "expires_at": "2026-11-28T13:36:58.007006411Z"
   },
   "meta": {
-    "seq": 35,
-    "updated_at": "2026-11-22T06:57:40.806621323Z",
+    "seq": 41,
+    "updated_at": "2026-11-28T13:33:58.007006411Z",
     "source": "mock",
     "stale": false
   }
@@ -533,7 +554,7 @@ curl -s -X POST "$BASE/reports" -H "Authorization: Bearer $TOKEN" \
 ## confirm someone else's report
 
 ```sh
-curl -s -X POST "$BASE/reports/rpt_5/votes" -H "Authorization: Bearer $TOKEN" \
+curl -s -X POST "$BASE/reports/rpt_61/votes" -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' -d '{"vote": "confirm"}'
 ```
 
@@ -542,7 +563,7 @@ curl -s -X POST "$BASE/reports/rpt_5/votes" -H "Authorization: Bearer $TOKEN" \
 ```json
 {
   "data": {
-    "id": "rpt_5",
+    "id": "rpt_61",
     "category": "flood",
     "status": "waiting",
     "lat": -6.9175,
@@ -551,13 +572,13 @@ curl -s -X POST "$BASE/reports/rpt_5/votes" -H "Authorization: Bearer $TOKEN" \
     "severity": 2,
     "confirm_count": 1,
     "dispute_count": 0,
-    "created_at": "2026-11-22T06:57:40.806621323Z",
+    "created_at": "2026-11-28T13:33:58.007006411Z",
     "verified_at": null,
-    "expires_at": "2026-11-22T07:00:40.806621323Z"
+    "expires_at": "2026-11-28T13:36:58.007006411Z"
   },
   "meta": {
-    "seq": 35,
-    "updated_at": "2026-11-22T06:57:40.806621323Z",
+    "seq": 41,
+    "updated_at": "2026-11-28T13:33:58.007006411Z",
     "source": "mock",
     "stale": false
   }
@@ -576,17 +597,17 @@ curl -s -X POST "$BASE/subscriptions" -H "Authorization: Bearer $TOKEN" \
 ```json
 {
   "data": {
-    "id": "sub_c375b68584b042689d4b",
+    "id": "sub_4b44922e2da54883b5b1",
     "name": "Kampus",
     "lat": -6.8915,
     "lon": 107.6107,
     "radius_m": 1000,
-    "created_at": "2026-11-22T06:57:40.826862536Z",
+    "created_at": "2026-11-28T13:33:58.017972371Z",
     "risk_level": "safe"
   },
   "meta": {
-    "seq": 35,
-    "updated_at": "2026-11-22T06:57:40.806621323Z",
+    "seq": 41,
+    "updated_at": "2026-11-28T13:33:58.007006411Z",
     "source": "mock",
     "stale": false
   }
@@ -605,18 +626,18 @@ curl -s -X GET "$BASE/subscriptions" -H "Authorization: Bearer $TOKEN"
 {
   "data": [
     {
-      "id": "sub_c375b68584b042689d4b",
+      "id": "sub_4b44922e2da54883b5b1",
       "name": "Kampus",
       "lat": -6.8915,
       "lon": 107.6107,
       "radius_m": 1000,
-      "created_at": "2026-11-22T06:57:40.826Z",
+      "created_at": "2026-11-28T13:33:58.017Z",
       "risk_level": "safe"
     }
   ],
   "meta": {
-    "seq": 35,
-    "updated_at": "2026-11-22T06:57:40.806621323Z",
+    "seq": 41,
+    "updated_at": "2026-11-28T13:33:58.007006411Z",
     "source": "mock",
     "stale": false
   }
@@ -635,8 +656,8 @@ curl -s -X GET "$BASE/alerts?limit=5" -H "Authorization: Bearer $TOKEN"
 {
   "data": [],
   "meta": {
-    "seq": 35,
-    "updated_at": "2026-11-22T06:57:40.806621323Z",
+    "seq": 41,
+    "updated_at": "2026-11-28T13:33:58.007006411Z",
     "source": "mock",
     "stale": false
   }
@@ -654,18 +675,18 @@ curl -s -X GET "$BASE/_mock/state" -H "X-API-Key: $ADMIN_KEY"
 ```json
 {
   "data": {
-    "seed": 42,
+    "seed": 11,
     "tick_seconds": 5,
     "time_scale": 60,
-    "tick": 6,
+    "tick": 13,
     "active_scenario": null,
-    "live_reports": 5,
-    "active_disasters": 2,
+    "live_reports": 14,
+    "active_disasters": 1,
     "upstreams_down": []
   },
   "meta": {
-    "seq": 35,
-    "updated_at": "2026-11-22T06:57:40.806621323Z",
+    "seq": 41,
+    "updated_at": "2026-11-28T13:33:58.007006411Z",
     "source": "mock",
     "stale": false
   }
@@ -684,18 +705,18 @@ curl -s -X POST "$BASE/_mock/scenario" -H "X-API-Key: $ADMIN_KEY" \
 ```json
 {
   "data": {
-    "seed": 42,
+    "seed": 11,
     "tick_seconds": 5,
     "time_scale": 60,
-    "tick": 6,
+    "tick": 13,
     "active_scenario": "flood_verified",
-    "live_reports": 6,
-    "active_disasters": 2,
+    "live_reports": 15,
+    "active_disasters": 1,
     "upstreams_down": []
   },
   "meta": {
-    "seq": 38,
-    "updated_at": "2026-11-22T06:57:40.842523123Z",
+    "seq": 44,
+    "updated_at": "2026-11-28T13:33:58.025945860Z",
     "source": "mock",
     "stale": false
   }
@@ -705,7 +726,7 @@ curl -s -X POST "$BASE/_mock/scenario" -H "X-API-Key: $ADMIN_KEY" \
 ## delete the subscription
 
 ```sh
-curl -s -X DELETE "$BASE/subscriptions/sub_c375b68584b042689d4b" -H "Authorization: Bearer $TOKEN"
+curl -s -X DELETE "$BASE/subscriptions/sub_4b44922e2da54883b5b1" -H "Authorization: Bearer $TOKEN"
 ```
 
 `204`

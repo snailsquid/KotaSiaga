@@ -132,7 +132,7 @@ async fn main() {
     if !config.mock.enabled {
         adapters::feeds::spawn_live_inputs(engine.clone(), up.clone(), &config.upstreams);
     }
-    adapters::feeds::spawn_partner_feeds(partners.clone(), up, &config.upstreams);
+    adapters::feeds::spawn_partner_feeds(partners.clone(), engine.clone(), up, &config.upstreams);
     tracing::info!(
         tourism = if partners.tourism_cfg.mock {
             "mock"

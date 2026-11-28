@@ -108,8 +108,8 @@ mod tests {
             Utc::now(),
         );
         let (up, partners, routes) = crate::adapters_for(&config);
-        partners.refresh_tourism(&up, Utc::now()).await;
-        partners.refresh_health(&up, Utc::now()).await;
+        partners.refresh_tourism(&up, Utc::now(), false).await;
+        partners.refresh_health(&up, Utc::now(), false).await;
         AppState {
             config: std::sync::Arc::new(config),
             db,

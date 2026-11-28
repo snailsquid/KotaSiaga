@@ -2,7 +2,7 @@
 
 Read this whole file before you write or change code, an API contract, or a doc. Every agent in this cluster (Claude Code, Codex, Cursor, Copilot, Gemini CLI, others) follows this same file so the three services stay compatible. If your own idea conflicts with this file, this file wins. If this file is silent or unclear, stop and ask a human. Do not guess.
 
-- Last updated: 2026-11-22. Owner: Smart City group (KotaSiaga, class K02).
+- Last updated: 2026-11-28. Owner: Smart City group (KotaSiaga, class K02).
 - Status tags: **CONFIRMED** = stated in the Tugas Besar brief or in that group's submitted DDD paper. **FINAL** = decided by the owner; the other groups follow it. **PROPOSED** = drafted here, the other group must agree. **TBD** = unknown, ask.
 
 ## 0. Load this file in your agent
@@ -20,9 +20,9 @@ Do not copy sections of this file into other files. Edit this one and let the po
 
 | Group | Service | Public base URL | Provides to others | Status |
 |---|---|---|---|---|
-| Smart City | KotaSiaga (K02) | now `https://kotasiaga.arkk.dev/api`; planned `https://kotasiaga.stei.site/api` | risk level per area, weather, official disaster signals, citizen reports (incidents and events), safe routes, change feed, partner points with risk | Section 4 is FINAL (owner decision 2026-11-22, openapi v1.0.0) |
-| Tourism | JelajahLokal | TBD | `GET /feed/destinations` (id, name, category, lat, lon; published only; `X-API-Key`) | CONFIRMED in their DDD |
-| Health | DonorKita | `https://donorkita.stei.site/api` | blood stock per type, nearest donation events, active request counts per region (`X-API-Key`) | CONFIRMED in their DDD; exact paths TBD |
+| Smart City | KotaSiaga (K02) | STB microservice `https://2bintang1hati.stei.site/api`; off-STB Layanan Integrasi (Tugas 3) `https://kotasiaga.arkk.dev/api` | risk level per area, weather, official disaster signals, citizen reports (incidents and events), safe routes, change feed, partner points with risk | Section 4 is FINAL (owner decision 2026-11-22; openapi v1.1.0, additive) |
+| Tourism | JelajahLokal (`elnoraam/jelajah-lokal`) | `https://chitatomigoreng.stei.site/api` | `GET /feed/destinations` (id, name, category, lat, lon, updated_at; published only; `limit` max 200, `offset`, `meta.total`; `X-API-Key`) | CONFIRMED in their source (`core-service/app/modules/feed.py`) |
+| Health | DonorKita (`rnfaizi/DonorKita`) | `https://donorkita.stei.site/api` | `GET /donation-events` only (scheduled donation events; `limit` max 200, `offset`, `meta.total`; `X-API-Key`). Their owner excluded `/blood-stock` and `/requests/summary` from our integration | CONFIRMED in their source (`core-service/app/modules/drives.py`) |
 
 Who calls whom (arrow = "uses the API of"):
 
@@ -49,7 +49,7 @@ Dates: DDD paper due end of Week 13 (2026-11-22). Base URL and docs in the API R
 
 ## 3. API conventions (all three services)
 
-- Public base is `https://<name>.stei.<fun|site>/api` (K02 uses `.stei.site`; KotaSiaga is served at `https://kotasiaga.arkk.dev/api` until the STB tunnel is up). Paths below are relative to `/api`.
+- Public base is `https://<name>.stei.<fun|site>/api` (K02 uses `.stei.site`; the KotaSiaga STB microservice is `https://2bintang1hati.stei.site/api`, and `https://kotasiaga.arkk.dev/api` is the off-STB Layanan Integrasi). Paths below are relative to `/api`.
 - JSON only. Keys are English `snake_case`. Enum values are lowercase English.
 - Time: ISO 8601 UTC with `Z`. Distance in meters, duration in seconds, temperature in °C.
 - Coordinates: `lat`, `lon`, decimal degrees WGS84. `bbox` is `min_lon,min_lat,max_lon,max_lat`. Radius is `radius_m`.
@@ -72,7 +72,7 @@ Dates: DDD paper due end of Week 13 (2026-11-22). Base URL and docs in the API R
 
   Codes: `invalid_api_key` 401, `invalid_token` 401 (user JWT or refresh token), `invalid_credentials` 401 (login), `forbidden` 403, `not_found` 404, `conflict` 409, `validation_error` 422, `rate_limited` 429, `upstream_unavailable` 503.
 
-## 4. Smart City contract (FINAL, KotaSiaga, openapi v1.0.0)
+## 4. Smart City contract (FINAL, KotaSiaga, openapi v1.1.0)
 
 Auth column: `key` = `X-API-Key`, `jwt` = user token, `pub` = none.
 
@@ -138,16 +138,20 @@ Risk rules live in one config file, never scattered. Starting values (tunable): 
 
 | From | What we call | We map it to | Status |
 |---|---|---|---|
-| Tourism | `GET /feed/destinations` with `X-API-Key` | `TitikPantau` (id, name, category, lat, lon) | CONFIRMED |
-| Health | donation events and stock endpoints with `X-API-Key` | `TitikTujuan` for safe routes (id, name, lat, lon, opens_at, closes_at) | paths TBD |
+| Tourism | `GET https://chitatomigoreng.stei.site/api/feed/destinations?limit=200&offset=N` with `X-API-Key`. Item `{id: "7", name, category, lat, lon, updated_at}`, `category` one of `nature`, `culture_history`, `local_culinary`, `tourism_village`, `craft` | `TitikPantau` (`tour_<id>`, name, category, lat, lon) | CONFIRMED |
+| Health | `GET https://donorkita.stei.site/api/donation-events?limit=200&offset=N` with `X-API-Key`. Item `{id: "evt_1", name, organizer, facility_id, address, lat, lon, opens_at, closes_at, slots_total, slots_free, capacity_per_hour, status, needed_blood_types[], updated_at}` | `TitikTujuan` for safe routes (`dnr_<id>`, name, lat, lon, opens_at, closes_at; `slots_free` -> `slots_available`) | CONFIRMED (only this endpoint) |
 
-Open mismatch: our DDD paper says Health gives "fasilitas kesehatan dan jam buka". DonorKita actually exposes donation events, stock and request counts, and gets facilities from OSM itself. Adapter maps a donation event or UDD location to `TitikTujuan`. A human must align the paper wording.
+Both feeds cap `limit` at 200, so every adapter asks for `limit=200` and pages with `offset` until `meta.total` (at most 5 pages). The parsers, the real-shape mocks and the real sample payloads live in one crate, `services/partner-contracts`, used by both `core-service` and the Layanan Integrasi.
+
+Two consumers: `core-service` on the STB (its own adapter, for `/monitor-points`, `/destination-points` and `destination_id` in `/routes/safe`) and the off-STB Layanan Integrasi (`services/integration-service`, section 9), which the mobile app uses.
+
+Open mismatch: our DDD paper says Health gives "fasilitas kesehatan dan jam buka". DonorKita actually exposes donation events (stock and request counts are not offered to us), and gets facilities from OSM itself. Adapter maps a donation event to `TitikTujuan`. A human must align the paper wording.
 
 Tourism and Health consume our `/status`, `/risk` and `/routes/safe` the same way: through their own adapter, with their own cache.
 
 ## 6. Resilience (every consumer, server or mobile)
 
-- Timeout 5 s per call. One retry with jitter on timeout or 5xx. No retry on 4xx.
+- Timeout 5 s per call. One retry with jitter on timeout, network error (connection refused or reset, DNS) or 5xx. No retry on 4xx.
 - Keep the last good response per endpoint. Suggested TTL: weather 10 min, risk 60 s, destinations feed 5 min.
 - On failure return the cached data with `meta.stale: true`. With no cache, disable that feature and show a clear message ("Data risiko belum tersedia"). The app must never crash because another group is down.
 - Log every cross-group call as one line: timestamp, service, URL path, status, ms. This log is the "bukti" the README and demo video need.
@@ -167,7 +171,7 @@ Switches (env):
 | `MOCK_TICK_SECONDS` | `5` | generator interval (2 to 60) |
 | `MOCK_TIME_SCALE` | `60` | simulated seconds per real second for expiry and forecast |
 | `MOCK_SEED` | random | set for reproducible tests; always log the seed at startup |
-| `MOCK_UPSTREAM_TOURISM`, `MOCK_UPSTREAM_HEALTH` | `false` | adapter returns generated data in that group's contract (also the fallback when their API is late, as the brief allows) |
+| `MOCK_UPSTREAM_TOURISM`, `MOCK_UPSTREAM_HEALTH` | follows `MOCK_MODE` | adapter returns generated data in that group's exact contract (also the fallback when their API is late, as the brief allows). Unset = same as `MOCK_MODE`; set `false` to call a live partner even in mock mode. A partner without a base URL is always mocked |
 
 Generator (Smart City). Each tick makes 1 to 3 random actions. Bounds: lat -6.98 to -6.84, lon 107.54 to 107.72 (Bandung).
 
@@ -180,7 +184,7 @@ Generator (Smart City). Each tick makes 1 to 3 random actions. Bounds: lat -6.98
 | Disasters | spawn up to 3 active signals, resolve after 2 to 5 real minutes | `/disasters`, `disaster.created`, `disaster.resolved` |
 | Risk | recomputed from the inputs above, never set by the mock | `/risk`, `risk.changed` |
 | Routes | recomputed per request from current risk, so the recommended route changes when risk does | `/routes/safe` |
-| Fault | 3% of ticks: pretend one upstream is down for 20 to 40 s | `meta.stale: true` |
+| Fault | 3% of ticks: pretend one upstream is down for 20 to 40 s (`open_meteo`, `petabencana`, `osrm`, `tourism`, `health`; `upstream_down` takes `"upstream"`) | `meta.stale: true` |
 | Consumed feeds | Tourism: 12 destinations around Bandung, one publish or unpublish every ~30 s. Health: donation events whose free slots fall and refill | adapters |
 
 Guarantees so a demo never looks frozen:
@@ -191,7 +195,8 @@ Guarantees so a demo never looks frozen:
 
 Scenario trigger for demos, only when `MOCK_MODE=true` (otherwise `404`), needs an admin `X-API-Key`:
 
-- `POST /_mock/scenario` body `{"name": "rain_storm"|"flood_verified"|"road_closure"|"event_crowd"|"disaster_signal"|"upstream_down"|"recover"|"reset", "lat": optional, "lon": optional}`.
+- `POST /_mock/scenario` body `{"name": "rain_storm"|"flood_verified"|"road_closure"|"event_crowd"|"disaster_signal"|"upstream_down"|"recover"|"reset", "lat": optional, "lon": optional, "upstream": optional, for upstream_down}`.
+- The Layanan Integrasi has the same switches and `POST /_mock/scenario` with `upstream_down` (`tourism`, `health`, `kotasiaga`) and `recover`.
 - `GET /_mock/state` shows current generator state and seed.
 
 Limits: the generator runs inside the core service (no extra container), keeps data in memory or the service DB with the caps above, and must stay within the container `mem_limit`.
@@ -228,7 +233,7 @@ Domain event names stay as in the DDD paper (`LaporanTerverifikasi`, `LaporanKed
   - Images are `linux/amd64` only for now: CI runs on Gitea Actions on the Volta host (current deploy target; Gitea pull-mirrors the repo and runs `.github/workflows`), which has no arm runner, and pushes to GHCR. An ARM STB cannot run the stack until multi-arch images (`linux/amd64` + `linux/arm64` under one tag) return with GitHub Actions, which builds each arch natively. Never compile Rust on the deploy host: the host only pulls.
 - Layout: five business contexts as modules in one `core-service` (own tables each), plus a separate Identity and Access container, an Nginx gateway and the Cloudflare tunnel.
 - Container limits: core `mem_limit: 256m`, `cpus: 0.5`; gateway `mem_limit: 64m`. Add `restart: unless-stopped`. Secrets in `.env` (git-ignored). Back up the database regularly.
-- Integration layer and the mobile app are deployed off the STB.
+- Integration layer and the mobile app are deployed off the STB. The Layanan Integrasi (Tugas 3) is `services/integration-service` (Rust, Axum), with its own `services/integration-service/Dockerfile`, `docker-compose.integration.yml` (`mem_limit: 128m`, `cpus: 0.5`) and `.env.integration`. It runs on Coolify on volta at `https://kotasiaga.arkk.dev`, never on the STB, and is never added to `docker-compose.yml`. Its contract is `services/integration-service/openapi.yaml`.
 - Check memory before adding a dependency (`docker stats`, `free -h`).
 
 ## 10. Change protocol
@@ -251,7 +256,8 @@ Domain event names stay as in the DDD paper (`LaporanTerverifikasi`, `LaporanKed
 
 ## 12. Open items
 
-- Group name `kotasiaga`, class K02, planned hostname `kotasiaga.stei.site`: register in the API Registry (current public URL `kotasiaga.arkk.dev`).
-- Health endpoint paths and fields; Tourism base URL.
+- API Registry: STB URL `https://2bintang1hati.stei.site/api`, Layanan Integrasi `https://kotasiaga.arkk.dev/api`.
+- Both partner tunnels returned Cloudflare 1033 on 2026-11-28; adapters run on their real-shape mocks until they are back. Keys to exchange: `TOURISM_API_KEY`, `HEALTH_API_KEY` (from them), and a KotaSiaga key for each of them.
+- DonorKita has no client for KotaSiaga yet (Health -> Smart City arrow); JelajahLokal's `.env.example` still points at a placeholder KotaSiaga URL. Tell their humans.
 - Tourism ↔ Health arrows.
 - Section 4 is FINAL by owner decision (2026-11-22); Tourism and Health follow it once the docs are on Drive.

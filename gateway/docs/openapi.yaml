@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
   title: KotaSiaga Smart City API
-  version: 1.0.0
+  version: 1.1.0
   license:
     name: For coursework (TST x PWAM, ITB); test data only
-    url: https://kotasiaga.arkk.dev/api/docs
+    url: https://2bintang1hati.stei.site/api/docs
   contact:
     name: KotaSiaga (K02, Smart City)
     email: kotasiaga@example.com
@@ -15,7 +15,12 @@ info:
 
     Contract status: **FINAL** (v1.0.0, 2026-11-22). From now on only additive changes; a
     breaking change needs a new major version and notice to Tourism (JelajahLokal) and Health
-    (DonorKita) first.
+    (DonorKita) first. v1.1.0 (2026-11-28, additive): STB server URL, optional `upstream` in
+    `POST /_mock/scenario`, partner examples in JelajahLokal / DonorKita's real formats.
+
+    The KotaSiaga mobile app does not call this API directly: it goes through the off-STB
+    Layanan Integrasi at `https://kotasiaga.arkk.dev/api` (see README.txt), which combines this
+    API with JelajahLokal and DonorKita.
 
     Auth: other groups send their own revocable group key in `X-API-Key` (ask the KotaSiaga
     team, see README). App users log in at `/auth/login` and send `Authorization: Bearer <jwt>`.
@@ -28,10 +33,8 @@ info:
     Service area: Bandung Raya (lat -7.10 to -6.75, lon 107.45 to 107.80), split into 500 m cells.
     A `lat`/`lon` outside it returns `422 validation_error`; a `bbox` is clipped to it.
 servers:
-  - url: https://kotasiaga.arkk.dev/api
-    description: Current public deployment
-  - url: https://kotasiaga.stei.site/api
-    description: Planned class URL (K02, STB + Cloudflare tunnel)
+  - url: https://2bintang1hati.stei.site/api
+    description: KotaSiaga microservice on the STB (K02, Cloudflare tunnel)
 tags:
   - name: system
     description: Liveness.
@@ -329,7 +332,7 @@ paths:
       description: |
         Published destinations from JelajahLokal `GET /feed/destinations`, refreshed every
         5 minutes (every 30 s while their API is mocked), inside the service area only.
-        `meta.source` is `mock` while the Tourism upstream is mocked.
+        `meta.source` is `mock` while the Tourism upstream is mocked (`MOCK_UPSTREAM_TOURISM`, which follows `MOCK_MODE` when unset).
       operationId: listMonitorPoints
       parameters:
         - $ref: '#/components/parameters/Bbox'
@@ -648,6 +651,13 @@ paths:
                   enum: [rain_storm, flood_verified, road_closure, event_crowd, disaster_signal, upstream_down, recover, reset]
                 lat: { type: number, format: double }
                 lon: { type: number, format: double }
+                upstream:
+                  type: string
+                  description: |
+                    Only for `upstream_down`: what goes down for 30 s (default `open_meteo`).
+                    `tourism` / `health` make that partner feed fail, so `/monitor-points` or
+                    `/destination-points` serve the last good copy with `meta.stale: true`.
+                  enum: [open_meteo, petabencana, osrm, tourism, health]
       responses:
         '202':
           description: Scenario accepted
@@ -1057,9 +1067,14 @@ components:
       type: object
       required: [id, name, category, lat, lon, cell_id, risk_level, rain_mm_h]
       properties:
-        id: { type: string, example: tour_dst_01 }
+        id: { type: string, example: tour_7, description: '`tour_` + the JelajahLokal id' }
         name: { type: string }
-        category: { type: string, description: 'As given by Tourism, lowercased' }
+        category:
+          type: string
+          description: |
+            As given by Tourism, lowercased. JelajahLokal sends `nature`, `culture_history`,
+            `local_culinary`, `tourism_village` or `craft`.
+          example: culture_history
         lat: { type: number, format: double }
         lon: { type: number, format: double }
         cell_id: { type: string }
@@ -1070,14 +1085,14 @@ components:
       type: object
       required: [id, name, kind, lat, lon, opens_at, closes_at, slots_available, cell_id, risk_level, rain_mm_h]
       properties:
-        id: { type: string, example: dnr_evt_001 }
+        id: { type: string, example: dnr_evt_1, description: '`dnr_` + the DonorKita event id' }
         name: { type: string }
         kind: { type: string, enum: [donation_event] }
         lat: { type: number, format: double }
         lon: { type: number, format: double }
         opens_at: { type: string, format: date-time, nullable: true }
         closes_at: { type: string, format: date-time, nullable: true }
-        slots_available: { type: integer, minimum: 0, nullable: true }
+        slots_available: { type: integer, minimum: 0, nullable: true, description: 'DonorKita `slots_free`' }
         cell_id: { type: string }
         risk_level: { $ref: '#/components/schemas/RiskLevel' }
         rain_mm_h: { type: number, minimum: 0 }

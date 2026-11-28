@@ -1,0 +1,23 @@
+# Layanan Integrasi (Tugas 3): a SEPARATE stack from docker-compose.yml, deployed OFF the STB
+# (Coolify on volta, public URL https://kotasiaga.arkk.dev). The STB runs microservice
+# containers only (AGENTS.md sections 2.6 and 9), so this file never goes on the STB.
+# It calls KotaSiaga on the STB (KOTASIAGA_BASE_URL), JelajahLokal and DonorKita.
+#
+#   cp .env.integration.example .env.integration   # fill in the keys (never commit it)
+#   docker compose -f docker-compose.integration.yml up -d
+# Local build instead of pulling from GHCR:
+#   docker compose -f docker-compose.integration.yml -f docker-compose.integration.build.yml up --build
+name: kotasiaga-integration
+
+services:
+  integration-service:
+    image: ${IMAGE_REGISTRY:-ghcr.io/snailsquid}/kotasiaga-integration:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    env_file: .env.integration
+    environment:
+      PORT: "8090"
+    # Loopback only. Public traffic: Coolify's Traefik (domain kotasiaga.arkk.dev -> port 8090).
+    ports: ["127.0.0.1:${INTEGRATION_PORT:-8090}:8090"]
+    mem_limit: 128m
+    cpus: 0.5

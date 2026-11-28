@@ -34,7 +34,7 @@ const CATEGORIES: [(Category, f64); 5] = [
     (Category::RoadClosure, 0.15),
     (Category::EventCrowd, 0.15),
 ];
-const UPSTREAMS: [&str; 3] = ["open_meteo", "petabencana", "osrm"];
+pub const UPSTREAMS: [&str; 5] = ["open_meteo", "petabencana", "osrm", "tourism", "health"];
 const USERS: usize = 20;
 
 fn description(c: Category, n: i64) -> String {
@@ -150,7 +150,7 @@ impl Generator {
         self.tick += 1;
 
         if w.stale_upstream(now).is_none() && self.rng.chance(0.03) {
-            let up = UPSTREAMS[self.rng.int(0, 2) as usize].to_string();
+            let up = UPSTREAMS[self.rng.int(0, UPSTREAMS.len() as i64 - 1) as usize].to_string();
             w.set_stale(Some((up, now + Duration::seconds(self.rng.int(20, 40)))));
         }
 
@@ -351,6 +351,24 @@ impl Generator {
         at: Option<(f64, f64)>,
         now: DateTime<Utc>,
     ) -> Result<(), String> {
+        self.scenario_on(w, name, at, None, now)
+    }
+
+    pub fn scenario_on(
+        &mut self,
+        w: &mut World,
+        name: &str,
+        at: Option<(f64, f64)>,
+        upstream: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> Result<(), String> {
+        let upstream = upstream.unwrap_or("open_meteo");
+        if !UPSTREAMS.contains(&upstream) {
+            return Err(format!(
+                "upstream harus salah satu dari: {}",
+                UPSTREAMS.join(", ")
+            ));
+        }
         match name {
             "rain_storm" => self.rain_storm(w, now, at),
             "flood_verified" => self.verified_report(w, Category::Flood, at, now),
@@ -360,9 +378,7 @@ impl Generator {
                 let p = at.unwrap_or_else(|| random_point(&mut self.rng));
                 self.spawn_disaster(w, DisasterKind::Flood, p, now);
             }
-            "upstream_down" => {
-                w.set_stale(Some(("open_meteo".into(), now + Duration::seconds(30))))
-            }
+            "upstream_down" => w.set_stale(Some((upstream.into(), now + Duration::seconds(30)))),
             "recover" => {
                 w.set_stale(None);
                 let mut next = w.weather().clone();
@@ -496,6 +512,28 @@ mod tests {
                 "waiting reports raised risk"
             );
         }
+    }
+
+    #[test]
+    fn upstream_down_can_target_a_partner() {
+        let (e, t0) = engine(3);
+        e.update_mock(t0, |g, w| {
+            g.scenario_on(w, "upstream_down", None, Some("health"), t0)
+        })
+        .unwrap()
+        .unwrap();
+        let s = e.snapshot();
+        assert!(s.stale);
+        assert_eq!(
+            s.mock.as_ref().unwrap().upstreams_down,
+            vec!["health".to_string()]
+        );
+        let bad = e
+            .update_mock(t0, |g, w| {
+                g.scenario_on(w, "upstream_down", None, Some("nope"), t0)
+            })
+            .unwrap();
+        assert!(bad.is_err());
     }
 
     #[test]
