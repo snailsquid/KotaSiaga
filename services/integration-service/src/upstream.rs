@@ -1,8 +1,3 @@
-//! The only HTTP client to other services (AGENTS.md section 6): 5 s timeout, one retry with
-//! 200-600 ms jitter on timeout, network error or 5xx (never on 4xx, never for calls that are
-//! not safe to repeat), 4 MB body cap, and one `outbound` log line per attempt with timestamp,
-//! service, method, path (no query string), status and ms. Keys never reach the log.
-
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -15,8 +10,17 @@ const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 pub enum FetchError {
     Timeout,
     Network(String),
-    /// Answered, but not with the JSON its contract promises.
     Invalid(String),
+}
+
+impl FetchError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Network(_) => "network_error",
+            Self::Invalid(_) => "invalid_response",
+        }
+    }
 }
 
 impl std::fmt::Display for FetchError {
@@ -29,7 +33,6 @@ impl std::fmt::Display for FetchError {
     }
 }
 
-/// An HTTP answer (any status). `body` is `Null` when a non-2xx answer was not JSON.
 #[derive(Debug, Clone)]
 pub struct Resp {
     pub status: u16,
@@ -43,7 +46,6 @@ impl Resp {
     }
 }
 
-/// Demo faults (MOCK_MODE): upstream name -> down until.
 #[derive(Default)]
 pub struct Faults(Mutex<HashMap<String, Instant>>);
 
@@ -82,14 +84,12 @@ impl Faults {
     }
 }
 
-/// Path part of a URL (never the query string).
 pub fn log_path(url: &str) -> String {
     reqwest::Url::parse(url)
         .map(|u| u.path().to_string())
         .unwrap_or_else(|_| "?".into())
 }
 
-/// One line per outbound call. This log is the cross-group call evidence ("bukti").
 pub fn log_call(
     service: &str,
     method: &str,
@@ -107,6 +107,10 @@ fn jitter() -> Duration {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
+    jitter_from(nanos)
+}
+
+fn jitter_from(nanos: u32) -> Duration {
     Duration::from_millis(200 + (nanos % 400) as u64)
 }
 
@@ -188,9 +192,6 @@ impl Client {
         })
     }
 
-    /// One call with the retry policy. `retry`: false for calls that must not run twice
-    /// (creating a report, a vote, an account). `faults`: a demo fault turns the call into
-    /// a simulated outage without touching the network.
     #[allow(clippy::too_many_arguments)]
     pub async fn send(
         &self,
@@ -334,11 +335,17 @@ mod tests {
 
     #[tokio::test]
     async fn times_out_after_two_attempts() {
+        let hits = Arc::new(AtomicU32::new(0));
+        let h = hits.clone();
         let app = axum::Router::new().route(
             "/slow",
-            axum::routing::get(|| async {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                "late"
+            axum::routing::get(move || {
+                let h = h.clone();
+                async move {
+                    h.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    "late"
+                }
             }),
         );
         let base = serve(app).await;
@@ -355,7 +362,52 @@ mod tests {
             )
             .await;
         assert_eq!(r.unwrap_err(), FetchError::Timeout);
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
         assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[tokio::test]
+    async fn retries_once_on_network_error() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accepted = Arc::new(AtomicU32::new(0));
+        let a = accepted.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                a.fetch_add(1, Ordering::SeqCst);
+                drop(stream);
+            }
+        });
+        let started = Instant::now();
+        let r = Client::new(2000)
+            .send(
+                "t",
+                reqwest::Method::GET,
+                &format!("http://{addr}/x"),
+                &[],
+                None,
+                true,
+                &Faults::default(),
+            )
+            .await;
+        assert!(matches!(r, Err(FetchError::Network(_))), "{r:?}");
+        assert_eq!(accepted.load(Ordering::SeqCst), 2);
+        assert!(started.elapsed() >= Duration::from_millis(200));
+    }
+
+    #[test]
+    fn jitter_stays_within_200_to_600_ms() {
+        for n in [0u32, 1, 199, 399, 400, 401, 999_999_999, u32::MAX] {
+            let d = jitter_from(n);
+            assert!(
+                d >= Duration::from_millis(200) && d < Duration::from_millis(600),
+                "{n}: {d:?}"
+            );
+        }
+        for _ in 0..1000 {
+            let d = jitter();
+            assert!(d >= Duration::from_millis(200) && d < Duration::from_millis(600));
+        }
     }
 
     #[tokio::test]

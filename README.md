@@ -367,7 +367,8 @@ pulls). The STB runs the same `docker-compose.yml` with `COMPOSE_PROFILES=tunnel
 Integrasi**: a separate Coolify resource from `docker-compose.integration.yml`, image
 `ghcr.io/snailsquid/kotasiaga-integration` (built by the same CI, pushed on master), port 8090.
 Its environment variables are listed in [`.env.integration.example`](.env.integration.example) and
-README.txt section 7. Add an `integration:<key>` entry to the STB's `API_KEYS` and set the same key as
+README.txt section 7. Its per-IP rate limit takes the client IP from the last `X-Forwarded-For` hop,
+which is only correct behind Traefik (or another proxy that appends the real client IP). Add an `integration:<key>` entry to the STB's `API_KEYS` and set the same key as
 its `KOTASIAGA_API_KEY`. CI and the Coolify setup are maintained
 separately (DevOps). Before this version reaches master, set `JWT_SECRET` and
 `TEST_ACCOUNT_PASSWORD` in the Coolify app env.

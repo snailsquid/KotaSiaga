@@ -40,7 +40,6 @@ pub struct ScenarioRequest {
     name: String,
     lat: Option<f64>,
     lon: Option<f64>,
-    /// For `upstream_down`: open_meteo (default), petabencana, osrm, tourism or health.
     upstream: Option<String>,
 }
 

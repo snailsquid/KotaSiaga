@@ -1,15 +1,3 @@
-//! HTTP API of the Layanan Integrasi, for the KotaSiaga mobile app (base `/api`).
-//!
-//! - Combined (new service): `/monitor-points`, `/destination-points`, `/routes/safe`,
-//!   `/integration/status`.
-//! - KotaSiaga pass-through so the app needs one base URL: read endpoints (with a last-good
-//!   fallback cache), auth, reports, votes, subscriptions, alerts.
-//!
-//! Auth follows the cluster rules (AGENTS.md section 3): app users send their KotaSiaga JWT
-//! (`Authorization: Bearer`), checked against KotaSiaga `/auth/me`; server-to-server callers
-//! send an `X-API-Key` from this service's `API_KEYS`. Callers' keys are never forwarded:
-//! this service uses its own keys for KotaSiaga, JelajahLokal and DonorKita.
-
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
@@ -29,8 +17,6 @@ use serde_json::{Value, json};
 use crate::state::{App, KOTASIAGA, in_area};
 
 pub type Shared = Arc<App>;
-
-// ---- Errors (cluster error envelope) ----
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -78,12 +64,8 @@ impl IntoResponse for ApiError {
 
 type ApiResult = Result<Response, ApiError>;
 
-// ---- Auth ----
-
 pub enum Caller {
-    /// An `X-API-Key` from `API_KEYS` (or the admin key).
     Key(String),
-    /// A KotaSiaga user JWT, confirmed by KotaSiaga.
     User(String),
 }
 
@@ -94,7 +76,6 @@ fn hash(s: &str) -> u64 {
 }
 
 const TOKEN_FRESH: Duration = Duration::from_secs(60);
-/// While KotaSiaga is down, a token it confirmed this recently still counts.
 const TOKEN_GRACE: Duration = Duration::from_secs(15 * 60);
 
 async fn authorize(app: &App, h: &HeaderMap) -> Result<Caller, ApiError> {
@@ -176,7 +157,6 @@ async fn authorize(app: &App, h: &HeaderMap) -> Result<Caller, ApiError> {
     }
 }
 
-/// Headers for a KotaSiaga call on behalf of `caller`.
 fn kotasiaga_auth(app: &App, caller: &Caller) -> Result<Vec<(&'static str, String)>, ApiError> {
     match caller {
         Caller::User(t) => Ok(vec![("Authorization", format!("Bearer {t}"))]),
@@ -193,10 +173,7 @@ fn kotasiaga_auth(app: &App, caller: &Caller) -> Result<Vec<(&'static str, Strin
     }
 }
 
-// ---- Rate limit (fixed window per client IP) ----
-
 fn client_ip(req: &Request) -> String {
-    // Behind Coolify's Traefik the last X-Forwarded-For hop is the client Traefik saw.
     if let Some(ip) = req
         .headers()
         .get("x-forwarded-for")
@@ -243,8 +220,6 @@ async fn rate_limit(State(app): State<Shared>, req: Request, next: Next) -> Resp
     next.run(req).await
 }
 
-// ---- KotaSiaga pass-through ----
-
 fn reply(status: u16, body: Value, retry_after: Option<String>) -> Response {
     let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
     let mut res = if body.is_null() {
@@ -258,7 +233,6 @@ fn reply(status: u16, body: Value, retry_after: Option<String>) -> Response {
     res
 }
 
-/// How long a cached KotaSiaga read may stand in while KotaSiaga is down (AGENTS.md section 6).
 fn max_age(path: &str) -> Duration {
     Duration::from_secs(match path {
         "/weather" => 600,
@@ -276,7 +250,6 @@ fn mark_stale(mut body: Value) -> Value {
     body
 }
 
-/// Forwards one call to KotaSiaga. `cache_for`: a read whose last good body may stand in.
 #[allow(clippy::too_many_arguments)]
 async fn forward(
     app: &App,
@@ -372,7 +345,6 @@ async fn read_through(State(app): State<Shared>, h: HeaderMap, req: Request) -> 
     .await
 }
 
-/// User endpoints: the caller's JWT goes to KotaSiaga as is; nothing is cached.
 async fn user_call(
     app: &App,
     h: &HeaderMap,
@@ -420,7 +392,6 @@ async fn auth_public(State(app): State<Shared>, req: Request) -> ApiResult {
     } else {
         serde_json::from_slice(&bytes).map_err(|_| ApiError::invalid("Body harus JSON"))?
     };
-    // Login can be repeated safely; register, refresh (rotates the token) and logout cannot.
     let retry = path == "/auth/login";
     forward(
         &app,
@@ -514,8 +485,6 @@ async fn vote(
     let path = format!("/reports/{}/votes", safe_id(&id)?);
     user_call(&app, &h, Method::POST, &path, None, Some(body), false).await
 }
-
-// ---- Combined endpoints ----
 
 struct ListParams {
     bbox: Option<(f64, f64, f64, f64)>,
@@ -726,8 +695,6 @@ fn point_in(v: Option<&Value>, name: &str) -> Result<(f64, f64), ApiError> {
     }
 }
 
-/// The destination a `destination_id` names: a DonorKita event (`dnr_…`) or a JelajahLokal
-/// destination (`tour_…`), from this service's own copy of the partner feeds.
 fn resolve(app: &App, id: &str) -> Option<(Value, f64, f64, bool)> {
     if let Some(raw) = id.strip_prefix("dnr_") {
         let f = app.health_feed();
@@ -829,22 +796,21 @@ async fn integration_status(State(app): State<Shared>) -> Json<Value> {
     let t = app.tourism_feed();
     let h = app.health_feed();
     let up = |f_mock: bool,
-              base: &Option<String>,
               stale: bool,
               fetched: Option<chrono::DateTime<Utc>>,
               items: usize,
               err: &Option<String>| {
         json!({
-            "mode": if f_mock { "mock" } else { "live" }, "base_url": if f_mock { Value::Null } else { json!(base) },
+            "mode": if f_mock { "mock" } else { "live" },
             "stale": stale, "fetched_at": iso(fetched), "items": items, "last_error": err,
         })
     };
     Json(json!({
         "data": {
-            "kotasiaga": {"base_url": app.cfg.kotasiaga_base_url, "risk_stale": app.risk_is_stale(),
+            "kotasiaga": {"risk_stale": app.risk_is_stale(),
                           "risk_points": app.risk.read().unwrap_or_else(|e| e.into_inner()).len()},
-            "tourism": up(t.mock, &app.cfg.tourism.base_url, t.stale, t.fetched_at, t.items.len(), &t.last_error),
-            "health": up(h.mock, &app.cfg.health.base_url, h.stale, h.fetched_at, h.items.len(), &h.last_error),
+            "tourism": up(t.mock, t.stale, t.fetched_at, t.items.len(), &t.last_error),
+            "health": up(h.mock, h.stale, h.fetched_at, h.items.len(), &h.last_error),
             "mock_mode": app.cfg.mock_mode,
             "upstreams_down": app.faults.down(),
         },
@@ -853,8 +819,6 @@ async fn integration_status(State(app): State<Shared>) -> Json<Value> {
                  "stale": t.stale || h.stale || app.risk_is_stale()},
     }))
 }
-
-// ---- Demo controls (MOCK_MODE only, admin key) ----
 
 fn admin(app: &App, h: &HeaderMap) -> Result<(), ApiError> {
     if !app.cfg.mock_mode {
@@ -933,8 +897,6 @@ async fn mock_scenario(
     }
     Ok((StatusCode::ACCEPTED, Json(mock_state(&app))).into_response())
 }
-
-// ---- Router ----
 
 async fn health_check() -> Json<Value> {
     Json(json!({"status": "ok"}))

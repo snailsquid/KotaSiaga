@@ -34,8 +34,6 @@ const CATEGORIES: [(Category, f64); 5] = [
     (Category::RoadClosure, 0.15),
     (Category::EventCrowd, 0.15),
 ];
-/// Upstreams the fault injector (and `upstream_down`) can take down. `tourism` and `health` are
-/// the partner feeds: their refresh fails and the last good copy is served as stale.
 pub const UPSTREAMS: [&str; 5] = ["open_meteo", "petabencana", "osrm", "tourism", "health"];
 const USERS: usize = 20;
 
@@ -356,8 +354,6 @@ impl Generator {
         self.scenario_on(w, name, at, None, now)
     }
 
-    /// `upstream` picks what `upstream_down` takes down (one of [`UPSTREAMS`], default
-    /// `open_meteo`); other scenarios ignore it.
     pub fn scenario_on(
         &mut self,
         w: &mut World,

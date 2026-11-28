@@ -1,28 +1,20 @@
-//! Configuration from the environment (`.env`, git-ignored). Every value has a safe default
-//! except the keys, which are only ever read from the environment and never logged.
-
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Upstream {
     pub base_url: Option<String>,
     pub api_key: Option<String>,
-    /// Serve the generated mock (in the partner's own format) instead of calling it.
     pub mock: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Config {
     pub port: u16,
-    /// KotaSiaga microservice on the STB, e.g. `https://2bintang1hati.stei.site/api`.
     pub kotasiaga_base_url: String,
-    /// Our group key for KotaSiaga's `X-API-Key` (risk lookups, routes, keyed reads).
     pub kotasiaga_api_key: Option<String>,
     pub tourism: Upstream,
     pub health: Upstream,
-    /// `X-API-Key` value -> caller name, for server-to-server callers of this service.
     pub api_keys: HashMap<String, String>,
-    /// Admin key for `/_mock/*`.
     pub admin_api_key: Option<String>,
     pub mock_mode: bool,
     pub mock_seed: u64,
@@ -30,6 +22,45 @@ pub struct Config {
     pub partner_refresh_s: u64,
     pub risk_refresh_s: u64,
     pub rate_limit_per_minute: u32,
+}
+
+fn redacted(k: &Option<String>) -> &'static str {
+    if k.is_some() { "<redacted>" } else { "<unset>" }
+}
+
+impl std::fmt::Debug for Upstream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Upstream")
+            .field("base_url", &self.base_url)
+            .field("api_key", &redacted(&self.api_key))
+            .field("mock", &self.mock)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut callers: Vec<&String> = self.api_keys.values().collect();
+        callers.sort();
+        f.debug_struct("Config")
+            .field("port", &self.port)
+            .field("kotasiaga_base_url", &self.kotasiaga_base_url)
+            .field("kotasiaga_api_key", &redacted(&self.kotasiaga_api_key))
+            .field("tourism", &self.tourism)
+            .field("health", &self.health)
+            .field(
+                "api_keys",
+                &format_args!("<redacted: {} keys for {:?}>", callers.len(), callers),
+            )
+            .field("admin_api_key", &redacted(&self.admin_api_key))
+            .field("mock_mode", &self.mock_mode)
+            .field("mock_seed", &self.mock_seed)
+            .field("timeout_ms", &self.timeout_ms)
+            .field("partner_refresh_s", &self.partner_refresh_s)
+            .field("risk_refresh_s", &self.risk_refresh_s)
+            .field("rate_limit_per_minute", &self.rate_limit_per_minute)
+            .finish()
+    }
 }
 
 const MIN_KEY_LEN: usize = 16;
@@ -111,7 +142,6 @@ impl Config {
         })
     }
 
-    /// `admin`, a caller name from `API_KEYS`, or `None`.
     pub fn caller(&self, key: &str) -> Option<&str> {
         if self.admin_api_key.as_deref() == Some(key) {
             return Some("admin");
@@ -210,7 +240,6 @@ mod tests {
         assert_eq!(c.caller("nope"), None);
     }
 
-    /// The shipped example must start as-is (blank keys = unset) and point at the real hosts.
     #[test]
     fn env_example_loads() {
         let path = concat!(
@@ -235,5 +264,27 @@ mod tests {
             Some("https://donorkita.stei.site/api")
         );
         assert!(!c.tourism.mock && !c.health.mock);
+    }
+
+    #[test]
+    fn debug_never_shows_keys() {
+        let c = cfg(&[
+            ("API_KEYS", "demo:aaaaaaaaaaaaaaaa"),
+            ("ADMIN_API_KEY", "bbbbbbbbbbbbbbbb"),
+            ("KOTASIAGA_API_KEY", "cccccccccccccccc"),
+            ("TOURISM_BASE_URL", "https://x.test/api"),
+            ("TOURISM_API_KEY", "dddddddddddddddd"),
+        ])
+        .unwrap();
+        let d = format!("{c:?}");
+        for secret in [
+            "aaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbb",
+            "cccccccccccccccc",
+            "dddddddddddddddd",
+        ] {
+            assert!(!d.contains(secret), "{d}");
+        }
+        assert!(d.contains("<redacted>") && d.contains("demo") && d.contains("https://x.test/api"));
     }
 }

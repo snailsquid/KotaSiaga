@@ -1,13 +1,3 @@
-//! KotaSiaga Layanan Integrasi (Tugas 3). Runs off the STB (Coolify on volta,
-//! https://kotasiaga.arkk.dev) and combines three services for the mobile app:
-//! - KotaSiaga, our own microservice on the STB (https://2bintang1hati.stei.site/api):
-//!   risk per point, safe routes, city data, user accounts and reports.
-//! - JelajahLokal (Tourism) `GET /feed/destinations` -> monitor points.
-//! - DonorKita (Health) `GET /donation-events` -> destination points for safe routes.
-//!
-//! Every outbound call goes through `upstream::Client` (timeout, retry, call log); partner
-//! payloads are parsed by `partner-contracts`; requests read memory only.
-
 mod api;
 mod config;
 mod state;
@@ -28,9 +18,6 @@ fn every(secs: u64) -> tokio::time::Interval {
     i
 }
 
-/// Partner feeds every `PARTNER_REFRESH_SECONDS` (default 300 s, the agreed 5 minute TTL), or
-/// every 30 s while mocked so changes show up; risk for every partner point every
-/// `RISK_REFRESH_SECONDS` (default 30 s; KotaSiaga's risk TTL is 60 s).
 fn spawn_loops(app: Arc<state::App>) {
     for which in ["tourism", "health"] {
         let a = app.clone();
@@ -59,7 +46,6 @@ fn spawn_loops(app: Arc<state::App>) {
     }
     let a = app;
     tokio::spawn(async move {
-        // Let the first partner fetch land before the first risk round.
         tokio::time::sleep(Duration::from_secs(2)).await;
         let mut t = every(a.cfg.risk_refresh_s);
         loop {

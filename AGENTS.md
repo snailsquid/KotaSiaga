@@ -151,7 +151,7 @@ Tourism and Health consume our `/status`, `/risk` and `/routes/safe` the same wa
 
 ## 6. Resilience (every consumer, server or mobile)
 
-- Timeout 5 s per call. One retry with jitter on timeout or 5xx. No retry on 4xx.
+- Timeout 5 s per call. One retry with jitter on timeout, network error (connection refused or reset, DNS) or 5xx. No retry on 4xx.
 - Keep the last good response per endpoint. Suggested TTL: weather 10 min, risk 60 s, destinations feed 5 min.
 - On failure return the cached data with `meta.stale: true`. With no cache, disable that feature and show a clear message ("Data risiko belum tersedia"). The app must never crash because another group is down.
 - Log every cross-group call as one line: timestamp, service, URL path, status, ms. This log is the "bukti" the README and demo video need.

@@ -104,7 +104,6 @@ paths:
                       kotasiaga:
                         type: object
                         properties:
-                          base_url: { type: string }
                           risk_stale: { type: boolean }
                           risk_points: { type: integer }
                       tourism: { $ref: '#/components/schemas/UpstreamStatus' }
@@ -581,11 +580,14 @@ components:
       type: object
       properties:
         mode: { type: string, enum: [live, mock] }
-        base_url: { type: string, nullable: true }
         stale: { type: boolean }
         fetched_at: { type: string, format: date-time, nullable: true }
         items: { type: integer }
-        last_error: { type: string, nullable: true }
+        last_error:
+          type: string
+          nullable: true
+          description: 'Short code of the last failed refresh: timeout, network_error, invalid_response, simulated_down or http_<status>'
+          example: http_503
 
     Risk:
       type: object

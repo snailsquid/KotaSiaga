@@ -79,8 +79,6 @@ pub fn spawn_live_inputs(engine: Arc<Engine>, up: Upstream, cfg: &UpstreamConfig
 
 /// Mocked partners refresh every 30 s so their changes show up; real ones every
 /// `PARTNER_REFRESH_SECONDS` (default 5 min, the agreed cache TTL for the destinations feed).
-/// In mock mode an `upstream_down` fault on `tourism` or `health` makes that refresh fail, so the
-/// last good copy is served with `meta.stale: true` (the stale banner can be demoed).
 pub fn spawn_partner_feeds(
     partners: Arc<Partners>,
     engine: Arc<Engine>,

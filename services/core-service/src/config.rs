@@ -51,10 +51,6 @@ pub struct MockConfig {
     pub tick_seconds: u64,
     pub time_scale: u32,
     pub seed: u64,
-    /// Serve the Tourism / Health mock (in that partner's own format) instead of calling it.
-    /// `MOCK_UPSTREAM_*` when set; otherwise follows `MOCK_MODE` (AGENTS.md section 7: in mock
-    /// mode every external input comes from the generator). A partner without a base URL is
-    /// always mocked, whatever these say.
     pub upstream_tourism: bool,
     pub upstream_health: bool,
 }
@@ -194,7 +190,6 @@ fn parse_bool(get: &impl Fn(&str) -> Option<String>, key: &str) -> Result<bool, 
     Ok(parse_opt_bool(get, key)?.unwrap_or(false))
 }
 
-/// `None` when unset (or blank), so a default can depend on another switch.
 fn parse_opt_bool(
     get: &impl Fn(&str) -> Option<String>,
     key: &str,

@@ -1,15 +1,6 @@
 //! Other groups' APIs -> our points.
 //! - Tourism (JelajahLokal) `GET /feed/destinations` -> TitikPantau (monitor point).
-//! - Health (DonorKita) `GET /donation-events` -> TitikTujuan (destination point for safe routes).
 //!
-//! The partner contracts (parsers, real-shape mocks, sample payloads) live in the shared
-//! `partner-contracts` crate, so this adapter and the off-STB integration service read the
-//! partners the same way. Upstream payloads are untrusted: only known fields are read, strings
-//! are capped and stripped of control characters, points outside the service area are dropped.
-//! Both partners cap `limit` at 200, so every refresh asks for `limit=200` and pages through
-//! `meta.total`. When a partner API is not configured, or it is mocked (`MOCK_UPSTREAM_*`,
-//! which follow `MOCK_MODE` when unset), the mock answers in that partner's own format and the
-//! same parser maps it, so the anti-corruption layer is always exercised.
 
 use std::sync::RwLock;
 use std::time::Instant;
@@ -117,8 +108,6 @@ impl Partners {
             .cloned()
     }
 
-    /// `down`: a mock fault is active for this partner (`upstream_down`), so the refresh fails
-    /// as if the partner were unreachable and the last good copy is served with `stale`.
     pub async fn refresh_tourism(&self, up: &Upstream, now: DateTime<Utc>, down: bool) {
         let res = fetch(
             up,
@@ -161,7 +150,6 @@ fn store<T>(
     }
 }
 
-/// Every page of the partner list (`limit=200`, then `offset` until `meta.total`), combined.
 async fn fetch(
     up: &Upstream,
     service: &str,
@@ -201,8 +189,6 @@ async fn fetch(
     }
     Ok(pages.finish())
 }
-
-// ---- Mapping to our points (the anti-corruption part) ----
 
 pub fn parse_destinations(v: &Value) -> Result<Vec<MonitorPoint>, FetchError> {
     let list = tourism::parse(v).map_err(FetchError::Invalid)?;
@@ -283,7 +269,6 @@ mod tests {
         assert_ne!(slots(&ev), slots(&later), "slots change over time");
     }
 
-    /// DonorKita's real payload (`drives.py::_event_out`): `slots_free` becomes `slots_available`.
     #[test]
     fn real_donorkita_sample_keeps_free_slots() {
         let v: Value = serde_json::from_str(health::SAMPLE).unwrap();
@@ -294,7 +279,6 @@ mod tests {
         assert_eq!(ev[1].slots_available, Some(32));
     }
 
-    /// JelajahLokal's real payload (`feed.py`): Gua Pawon lies outside Bandung Raya.
     #[test]
     fn real_jelajahlokal_sample_maps_inside_the_area() {
         let v: Value = serde_json::from_str(tourism::SAMPLE).unwrap();
@@ -334,8 +318,6 @@ mod tests {
         }
     }
 
-    /// A live partner with 450 destinations: three pages of `limit=200`, every item kept
-    /// (inside the area), and the key goes in `X-API-Key`.
     #[tokio::test]
     async fn live_feed_pages_through_meta_total() {
         use axum::extract::Query;

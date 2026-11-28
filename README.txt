@@ -308,6 +308,10 @@ Compose resource from docker-compose.integration.yml, domain kotasiaga.arkk.dev
             UPSTREAM_TIMEOUT_MS (5000), PARTNER_REFRESH_SECONDS (300),
             RISK_REFRESH_SECONDS (30), RATE_LIMIT_PER_MINUTE (600), RUST_LOG
 
+The per-IP rate limit takes the client IP from the last X-Forwarded-For hop,
+which is only correct behind Traefik (or another proxy that appends the real
+client IP); exposed directly, a client could set that header itself.
+
 Never deploy this file on the STB.
 
 

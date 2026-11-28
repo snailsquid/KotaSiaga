@@ -1,41 +1,25 @@
-//! Contracts of the partner APIs KotaSiaga consumes, in one place for every adapter:
-//! - Tourism, JelajahLokal (`elnoraam/jelajah-lokal`, `core-service/app/modules/feed.py`):
-//!   `GET /feed/destinations` with `X-API-Key`.
-//! - Health, DonorKita (`rnfaizi/DonorKita`, `core-service/app/modules/drives.py`):
-//!   `GET /donation-events` with `X-API-Key`.
-//!
-//! Each module has a tolerant parser (the anti-corruption part: only known fields are read,
-//! strings are capped and stripped of control characters, invalid items are dropped), a mock
-//! that answers in exactly the partner's shape (fields, id format, enums, envelope, `limit` /
-//! `offset` / `meta.total`), and the real sample payload used by the contract tests.
-//! Both partners cap `limit` at 200, so [`Paginator`] pages through `meta.total`.
-
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-/// Largest page both partners accept (`limit` max 200, default 50).
 pub const PAGE_LIMIT: usize = 200;
-/// At most this many pages per refresh (1000 items), so a broken `meta.total` cannot loop.
 pub const MAX_PAGES: usize = 5;
-/// Items kept per feed after parsing.
 pub const MAX_ITEMS: usize = PAGE_LIMIT * MAX_PAGES;
 
-/// ISO 8601 UTC with `Z`, second precision: the format both partners emit.
 pub fn iso(t: DateTime<Utc>) -> String {
     t.format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-/// `?limit=200&offset=N` for one page.
 pub fn page_query(offset: usize) -> String {
     format!("limit={PAGE_LIMIT}&offset={offset}")
 }
 
-/// Collects every page of a partner list: ask for `next_offset()`, fetch it, `push` the body.
-/// Stops when a page is short, when `meta.total` is reached, or after [`MAX_PAGES`].
 #[derive(Default)]
 pub struct Paginator {
     items: Vec<Value>,
+    seen: std::collections::HashSet<String>,
+    received: usize,
+    warned: bool,
     total: Option<u64>,
     pages: usize,
     done: bool,
@@ -48,22 +32,35 @@ impl Paginator {
     }
 
     pub fn next_offset(&self) -> Option<usize> {
-        (!self.done && self.pages < MAX_PAGES).then_some(self.items.len())
+        (!self.done && self.pages < MAX_PAGES).then_some(self.received)
     }
 
-    /// Adds one page. Errors when the body is not the partner's `{data: [...]}` envelope.
     pub fn push(&mut self, page: Value) -> Result<(), String> {
         let list = data_items(&page).ok_or("expected a data array")?;
         let n = list.len();
-        self.items.extend(list.iter().cloned());
+        self.received += n;
+        for item in list {
+            let fresh = text(item.get("id"), 64).is_none_or(|id| self.seen.insert(id));
+            if fresh {
+                self.items.push(item.clone());
+            }
+        }
         self.pages += 1;
         if let Some(t) = page.pointer("/meta/total").and_then(Value::as_u64) {
             self.total = Some(t);
+            if t > MAX_ITEMS as u64 && !self.warned {
+                self.warned = true;
+                tracing::warn!(
+                    total = t,
+                    max = MAX_ITEMS,
+                    "partner list longer than MAX_ITEMS; the rest is not fetched"
+                );
+            }
         }
         if self.meta.is_none() {
             self.meta = page.get("meta").cloned();
         }
-        let reached = self.total.is_some_and(|t| self.items.len() as u64 >= t);
+        let reached = self.total.is_some_and(|t| self.received as u64 >= t);
         if n < PAGE_LIMIT || n == 0 || reached {
             self.done = true;
         }
@@ -74,7 +71,6 @@ impl Paginator {
         self.pages
     }
 
-    /// One combined body, `{data: [all items], meta: {first page's meta, total}}`.
     pub fn finish(self) -> Value {
         let mut meta = self.meta.unwrap_or_else(|| json!({}));
         if let (Some(t), Some(m)) = (self.total, meta.as_object_mut()) {
@@ -84,8 +80,6 @@ impl Paginator {
     }
 }
 
-// ---- Sanitizing helpers ----
-
 pub fn data_items(v: &Value) -> Option<&Vec<Value>> {
     v.get("data")
         .and_then(Value::as_array)
@@ -93,10 +87,17 @@ pub fn data_items(v: &Value) -> Option<&Vec<Value>> {
         .or_else(|| v.pointer("/data/items").and_then(Value::as_array))
 }
 
-/// A string (or number) field, control characters removed, trimmed, at most `max` chars.
+fn invisible(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
 pub fn text(v: Option<&Value>, max: usize) -> Option<String> {
     let s: String = match v? {
-        Value::String(s) => s.chars().filter(|c| !c.is_control()).take(max).collect(),
+        Value::String(s) => s
+            .chars()
+            .filter(|c| !c.is_control() && !invisible(*c))
+            .take(max)
+            .collect(),
         Value::Number(n) => n.to_string(),
         _ => return None,
     };
@@ -154,14 +155,11 @@ fn page_of<T: Clone>(rows: &[T], limit: usize, offset: usize) -> Vec<T> {
         .collect()
 }
 
-// ---- Tourism: JelajahLokal ----
-
 pub mod tourism {
     use super::*;
 
     pub const SERVICE: &str = "tourism";
     pub const PATH: &str = "/feed/destinations";
-    /// JelajahLokal `CATEGORY_API` values.
     pub const CATEGORIES: [&str; 5] = [
         "nature",
         "culture_history",
@@ -169,10 +167,8 @@ pub mod tourism {
         "tourism_village",
         "craft",
     ];
-    /// A real `GET /feed/destinations` body, built from JelajahLokal's `feed.py` and seed data.
     pub const SAMPLE: &str = include_str!("../fixtures/jelajahlokal_feed_destinations.json");
 
-    /// One published destination, as JelajahLokal sends it (`id` is their opaque string).
     #[derive(Clone, Debug, PartialEq, Serialize)]
     pub struct Destination {
         pub id: String,
@@ -239,9 +235,6 @@ pub mod tourism {
         ),
     ];
 
-    /// `GET /feed/destinations?limit&offset` in JelajahLokal's exact shape: 12 Bandung places,
-    /// exactly one unpublished at a time, a different one every 30 s ("publish or unpublish
-    /// every ~30 s", AGENTS.md section 7).
     pub fn mock_feed(now: DateTime<Utc>, limit: usize, offset: usize) -> Value {
         let window = now.timestamp().div_euclid(30);
         let hidden = window.rem_euclid(PLACES.len() as i64) as usize;
@@ -266,17 +259,13 @@ pub mod tourism {
     }
 }
 
-// ---- Health: DonorKita ----
-
 pub mod health {
     use super::*;
 
     pub const SERVICE: &str = "health";
     pub const PATH: &str = "/donation-events";
-    /// A real `GET /donation-events` body, built from DonorKita's `drives.py::_event_out` and seed.
     pub const SAMPLE: &str = include_str!("../fixtures/donorkita_donation_events.json");
 
-    /// One scheduled donation event, as DonorKita sends it.
     #[derive(Clone, Debug, PartialEq, Serialize)]
     pub struct DonationEvent {
         pub id: String,
@@ -289,7 +278,6 @@ pub mod health {
         pub opens_at: Option<DateTime<Utc>>,
         pub closes_at: Option<DateTime<Utc>>,
         pub slots_total: Option<u32>,
-        /// DonorKita's `slots_free` (older drafts: `slots_available`, or `quota - registered`).
         pub slots_free: Option<u32>,
         pub capacity_per_hour: Option<u32>,
         pub status: Option<String>,
@@ -408,15 +396,12 @@ pub mod health {
         "ab_negative",
     ];
 
-    /// `GET /donation-events?limit&offset` in DonorKita's exact shape: scheduled events that
-    /// have not closed yet (an event that closed today moves to tomorrow), ordered by
-    /// `opens_at, id`. Free slots fall as people reserve and refill every 10 minutes.
     pub fn mock_events(now: DateTime<Utc>, limit: usize, offset: usize) -> Value {
         let base = now
             .date_naive()
             .and_hms_opt(1, 0, 0)
             .expect("01:00")
-            .and_utc(); // 08:00 WIB
+            .and_utc();
         let minute = now.timestamp().div_euclid(60) as u64;
         let mut rows: Vec<(DateTime<Utc>, usize, Value)> = SITES
             .iter()
@@ -504,7 +489,6 @@ mod tests {
         k
     }
 
-    /// The mock must have exactly the keys of the real sample (no more, no fewer).
     #[test]
     fn mocks_have_the_real_keys() {
         let now = t("2026-11-28T03:00:00Z");
@@ -541,7 +525,7 @@ mod tests {
         assert_eq!(e[0].slots_free, Some(47), "DonorKita sends slots_free");
         assert_eq!(e[0].slots_total, Some(50));
         assert_eq!(e[0].facility_id.as_deref(), Some("fac_1"));
-        assert_eq!(e[0].opens_at, Some(t("2026-11-29T01:00:00Z")));
+        assert_eq!(e[0].opens_at, Some(t("2036-11-29T01:00:00Z")));
         assert_eq!(e[0].needed_blood_types, vec!["ab_negative", "o_negative"]);
         assert_eq!(e[1].slots_free, Some(32));
     }
@@ -580,7 +564,6 @@ mod tests {
             v.iter().find(|x| x.id == id).unwrap().slots_free
         };
         assert_ne!(by_id(&e, "evt_1"), by_id(&later, "evt_1"));
-        // Late in the day every event has moved to tomorrow, so the list is never empty.
         let night = t("2026-11-28T15:00:00Z");
         assert_eq!(
             health::parse(&health::mock_events(night, 50, 0))
@@ -603,7 +586,12 @@ mod tests {
 
     #[test]
     fn paginator_follows_meta_total() {
-        let page = |n: usize, total: usize| json!({"data": vec![json!({"id": "x"}); n], "meta": {"total": total, "seq": 1}});
+        let next = std::cell::Cell::new(0usize);
+        let page = |n: usize, total: usize| {
+            let start = next.replace(next.get() + n);
+            let rows: Vec<Value> = (start..start + n).map(|i| json!({"id": i})).collect();
+            json!({"data": rows, "meta": {"total": total, "seq": 1}})
+        };
         let mut p = Paginator::new();
         assert_eq!(p.next_offset(), Some(0));
         p.push(page(200, 450)).unwrap();
@@ -622,6 +610,22 @@ mod tests {
         }
         assert_eq!(p.next_offset(), None, "stops after MAX_PAGES");
         assert!(Paginator::new().push(json!({"error": "x"})).is_err());
+    }
+
+    #[test]
+    fn paginator_drops_repeated_ids_but_keeps_paging_by_received_count() {
+        let rows = |from: usize, to: usize| -> Vec<Value> {
+            (from..to).map(|i| json!({"id": i.to_string()})).collect()
+        };
+        let mut p = Paginator::new();
+        p.push(json!({"data": rows(0, 200), "meta": {"total": 300}}))
+            .unwrap();
+        assert_eq!(p.next_offset(), Some(200));
+        p.push(json!({"data": rows(150, 250), "meta": {"total": 300}}))
+            .unwrap();
+        assert_eq!(p.next_offset(), None);
+        let all = p.finish();
+        assert_eq!(all["data"].as_array().unwrap().len(), 250);
     }
 
     #[test]
@@ -646,5 +650,7 @@ mod tests {
         ]}))
         .unwrap();
         assert_eq!(h[0].slots_free, Some(6));
+        let v = json!({"data": [{"id": "1", "name": "Gedung\u{200B} Sate\u{202E}\u{2066}\u{200F}", "lat": -6.9, "lon": 107.6}]});
+        assert_eq!(tourism::parse(&v).unwrap()[0].name, "Gedung Sate");
     }
 }

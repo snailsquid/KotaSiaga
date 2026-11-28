@@ -1,7 +1,3 @@
-//! End-to-end tests against fake upstreams on localhost: a fake KotaSiaga (our contract) and
-//! fake partners that answer with the real sample payloads from `partner-contracts`
-//! (JelajahLokal `feed.py`, DonorKita `drives.py`).
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -24,7 +20,6 @@ const KS_KEY: &str = "ks-key-0123456789abcdef";
 const APP_KEY: &str = "app-key-0123456789abcdef";
 const ADMIN: &str = "admin-key-0123456789abcd";
 const GOOD_TOKEN: &str = "good-token";
-/// Fake login inputs for the fake KotaSiaga (not credentials of anything real).
 const LOGIN_OK: &str = "uji-benar";
 const LOGIN_BAD: &str = "uji-salah";
 
@@ -54,7 +49,6 @@ fn meta() -> Value {
     json!({"seq": 7, "updated_at": "2026-11-28T12:00:00Z", "source": "live", "stale": false})
 }
 
-/// A fake KotaSiaga that records what it was asked.
 async fn fake_kotasiaga(seen: Seen) -> String {
     let s1 = seen.clone();
     let s2 = seen.clone();
@@ -120,7 +114,6 @@ async fn fake_kotasiaga(seen: Seen) -> String {
     serve(app).await
 }
 
-/// Fake partners answering with the real sample payloads; records the query and key.
 async fn fake_partners(seen: Seen) -> String {
     let s1 = seen.clone();
     let s2 = seen.clone();
@@ -241,7 +234,6 @@ async fn health_is_public() {
     );
 }
 
-/// Contract test: live partners answering with the real JelajahLokal / DonorKita payloads.
 #[tokio::test]
 async fn live_partners_are_combined_with_kotasiaga_risk() {
     let e = env(&[], true).await;
@@ -288,7 +280,7 @@ async fn live_partners_are_combined_with_kotasiaga_risk() {
     );
     assert_eq!(d["slots_total"], 50);
     assert_eq!(d["organizer"], "Unit Uji Kampus");
-    assert_eq!(d["opens_at"], "2026-11-29T01:00:00Z");
+    assert_eq!(d["opens_at"], "2036-11-29T01:00:00Z");
     assert_eq!(
         d["needed_blood_types"],
         json!(["ab_negative", "o_negative"])
@@ -364,6 +356,37 @@ async fn auth_rules() {
 }
 
 #[tokio::test]
+async fn closed_events_are_hidden_even_from_a_stale_feed() {
+    let e = env(&[], true).await;
+    {
+        let mut f = e.app.health.write().unwrap();
+        f.items[0].closes_at = Some(Utc::now() - chrono::Duration::minutes(1));
+        f.stale = true;
+    }
+    let (s, b) = call(&e.app, "GET", "/api/destination-points", &[K], None).await;
+    assert_eq!(s, StatusCode::OK);
+    let ids: Vec<&str> = b["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["dnr_evt_2"]);
+    assert_eq!(b["meta"]["total"], 1);
+    assert_eq!(b["meta"]["stale"], true);
+    let body = json!({"origin": {"lat": -6.90, "lon": 107.60}, "destination_id": "dnr_evt_1"});
+    let (s, _) = call(&e.app, "POST", "/api/routes/safe", &[K], Some(body)).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let body = json!({"origin": {"lat": -6.90, "lon": 107.60}, "destination_id": "dnr_evt_2"});
+    assert_eq!(
+        call(&e.app, "POST", "/api/routes/safe", &[K], Some(body))
+            .await
+            .0,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
 async fn safe_route_by_destination_id() {
     let e = env(&[], true).await;
     let body = json!({"origin": {"lat": -6.90, "lon": 107.60}, "destination_id": "dnr_evt_1"});
@@ -430,7 +453,6 @@ async fn kotasiaga_down_serves_cache_as_stale() {
     assert_eq!(s, StatusCode::OK);
     assert_eq!(b["meta"]["stale"], true);
     assert_eq!(b["data"]["condition"], "cloudy");
-    // Nothing cached for this query: a clear 503, never a crash.
     let (s, b) = call(
         &e.app,
         "GET",
@@ -441,7 +463,6 @@ async fn kotasiaga_down_serves_cache_as_stale() {
     .await;
     assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(b["error"]["code"], "upstream_unavailable");
-    // Risk lookups fail too: the monitor points keep their last risk and say stale.
     e.app.refresh_risk().await;
     let (_, b) = call(&e.app, "GET", "/api/monitor-points", &[K], None).await;
     assert_eq!(b["meta"]["stale"], true);
@@ -482,6 +503,9 @@ async fn mock_mode_uses_partner_shapes_and_can_take_a_partner_down() {
     let (_, st) = call(&e.app, "GET", "/api/integration/status", &[], None).await;
     assert_eq!(st["data"]["tourism"]["stale"], true);
     assert_eq!(st["data"]["tourism"]["mode"], "mock");
+    assert_eq!(st["data"]["tourism"]["last_error"], "simulated_down");
+    assert!(st["data"]["tourism"].get("base_url").is_none());
+    assert!(st["data"]["kotasiaga"].get("base_url").is_none());
 
     call(
         &e.app,
@@ -559,7 +583,6 @@ async fn user_calls_forward_the_jwt_never_a_key() {
         seen.contains(&format!("report auth=Bearer {GOOD_TOKEN} key=")),
         "{seen:?}"
     );
-    // An API key caller cannot act as a user.
     let (s, _) = call(
         &e.app,
         "POST",
